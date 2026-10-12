@@ -48,3 +48,53 @@ async function runPathMkdir($, path) {
   }
 }
 
+// store claim protocols. a = naive, b = verify immediately, c = verify after 30 ms.
+// $.store can throw under cross-session contention ("Lock file is already being held"), so errors are recorded, not fatal.
+async function storeClaim($, variant, key, me) {
+  const t0 = await $.clock.now()
+  try {
+    const seen = await $.store.get(key)
+    if (seen !== undefined) return { won: false, seen, ms: (await $.clock.now()) - t0 }
+    await $.store.set(key, me)
+    if (variant === 'a') return { won: true, ms: (await $.clock.now()) - t0 }
+    if (variant === 'c') await sleep($, 30)
+    const back = await $.store.get(key)
+    return { won: back === me, back, ms: (await $.clock.now()) - t0 }
+  } catch (err) {
+    return { won: false, error: String(err).slice(0, 120), ms: (await $.clock.now()) - t0 }
+  }
+}
+
+// lease-file claim: if no file, write my id, wait, read back; I own it only if my id survived
+async function fsClaim($, variant, path, me) {
+  const t0 = await $.clock.now()
+  try {
+    if (await $.fs.exists(path)) return { won: false, ms: (await $.clock.now()) - t0, existed: true }
+    await $.fs.write(path, me)
+    if (variant === 'b') await sleep($, 10)
+    if (variant === 'c') await sleep($, 25)
+    const back = await $.fs.read(path)
+    return { won: back === me, back: String(back).slice(0, 40), ms: (await $.clock.now()) - t0 }
+  } catch (err) {
+    return { won: false, error: String(err).slice(0, 120), ms: (await $.clock.now()) - t0 }
+  }
+}
+
+// set with retries; reports attempts so we can see how bad contention gets
+async function setRetry($, key, value) {
+  for (let attempt = 1; attempt <= 20; attempt++) {
+    try {
+      await $.store.set(key, value)
+      return { ok: true, attempts: attempt }
+    } catch (err) {
+      await sleep($, 5)
+    }
+  }
+  return { ok: false, attempts: 20 }
+}
+
+function summarize(list) {
+  const xs = list.map((x) => x.ms).sort((p, q) => p - q)
+  if (xs.length === 0) return null
+  return { n: xs.length, min: xs[0], median: xs[Math.floor(xs.length / 2)], p95: xs[Math.floor(xs.length * 0.95)], max: xs[xs.length - 1] }
+}
