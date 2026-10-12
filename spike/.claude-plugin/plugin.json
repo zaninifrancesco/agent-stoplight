@@ -1,0 +1,6 @@
+{
+  "name": "stoplight-spike",
+  "version": "0.0.1",
+  "description": "Phase 0 spike: which primitive gives an atomic cross-session claim, and at what latency?",
+  "author": { "name": "agent-stoplight" }
+}
