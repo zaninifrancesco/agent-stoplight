@@ -98,3 +98,63 @@ function summarize(list) {
   if (xs.length === 0) return null
   return { n: xs.length, min: xs[0], median: xs[Math.floor(xs.length / 2)], p95: xs[Math.floor(xs.length * 0.95)], max: xs[xs.length - 1] }
 }
+
+async function batchMs($, n, fn) {
+  const t0 = await $.clock.now()
+  for (let i = 0; i < n; i++) await fn(i)
+  return ((await $.clock.now()) - t0) / n
+}
+
+async function experiments($, a) {
+  const me = await $.session.id()
+  const out = { runId: a.runId, mode: a.mode, me, claims: { cmd: [], node: [], path: [] }, store: { a: [], b: [], c: [] }, distinct: [], latency: {}, summary: {} }
+  // Forward slashes work on every platform, Windows included; only cmd's mkdir needs backslashes.
+  const dir = a.dir.replace(/\\/g, '/')
+  const isWindows = /^[a-zA-Z]:\//.test(dir)
+  out.platform = isWindows ? 'windows' : 'posix'
+  const file = dir + '/results/' + a.runId + '-' + me + '.json'
+  const flush = () => $.fs.write(file, JSON.stringify(out, null, 2))
+
+  if (a.mode === 'race') {
+    const wait = a.startAt - (await $.clock.now())
+    out.barrierWaitMs = wait
+    if (wait > 0) await sleep($, Math.min(wait, 4000))
+  }
+
+  // P1: filesystem mkdir claims through $.process.run
+  // On Windows the atomic claim is `cmd /c mkdir`; elsewhere it is the plain `mkdir` binary.
+  if (isWindows) {
+    for (let i = 0; i < KEYS; i++) {
+      const c = await runCmdMkdir($, dir + '/claims/' + a.runId + '-cmd-' + i)
+      out.claims.cmd.push({ key: i, ...c })
+    }
+  } else {
+    for (let i = 0; i < KEYS; i++) {
+      const c = await runPathMkdir($, dir + '/claims/' + a.runId + '-path-' + i)
+      out.claims.path.push({ key: i, ...c })
+    }
+  }
+  for (let i = 0; i < KEYS; i++) {
+    const c = await runNodeMkdir($, dir + '/claims/' + a.runId + '-node-' + i)
+    out.claims.node.push({ key: i, ...c })
+  }
+  await flush()
+
+  // P2: $.store claim protocols
+  for (const variant of ['a', 'b', 'c']) {
+    for (let i = 0; i < KEYS; i++) {
+      const r = await storeClaim($, variant, 'claim:' + a.runId + ':' + variant + ':' + i, me)
+      out.store[variant].push({ key: i, ...r })
+    }
+  }
+  await flush()
+
+  // P2b: filesystem lease files, claimed with write + read-back (the candidate design). fsA = read-back at once, fsB = after 10 ms, fsC = after 25 ms
+  out.fs = { a: [], b: [], c: [] }
+  for (const variant of ['a', 'b', 'c']) {
+    for (let i = 0; i < KEYS; i++) {
+      out.fs[variant].push({ key: i, ...(await fsClaim($, variant, dir + '/claims/' + a.runId + '-fs' + variant + '-' + i + '.lease', me)) })
+    }
+  }
+  await flush()
+
