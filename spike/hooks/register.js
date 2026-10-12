@@ -158,3 +158,84 @@ async function experiments($, a) {
   }
   await flush()
 
+  // P3: do writes to DISTINCT keys from concurrent sessions all survive?
+  for (let i = 0; i < KEYS; i++) out.distinct.push({ key: i, ...(await setRetry($, 'd:' + a.runId + ':' + me + ':' + i, i)) })
+  await flush()
+
+  // P4: single-call latency of the in-process primitives
+  const p = dir + '/scratch-' + me + '.txt'
+  out.latency = {
+    storeGetMs: await batchMs($, 200, () => $.store.get('claim:none')),
+    storeSetMs: await batchMs($, 100, (i) => setRetry($, 'lat:' + me + ':' + i, i)),
+    fsWriteMs: await batchMs($, 100, () => $.fs.write(p, 'x')),
+    fsReadMs: await batchMs($, 200, () => $.fs.read(p)),
+    fsExistsMs: await batchMs($, 200, () => $.fs.exists(p)),
+    clockNowMs: await batchMs($, 200, () => $.clock.now()),
+  }
+
+  out.summary = {
+    cmd: summarize(out.claims.cmd),
+    path: summarize(out.claims.path),
+    node: summarize(out.claims.node),
+    storeA: summarize(out.store.a),
+    storeB: summarize(out.store.b),
+    storeC: summarize(out.store.c),
+  }
+  await flush()
+  return out
+}
+
+async function verify($, runId, expected) {
+  const raw = await $.store.keys()
+  const keys = Array.isArray(raw) ? raw : Object.keys(raw ?? {})
+  const distinct = keys.filter((k) => k.startsWith('d:' + runId + ':')).length
+  return { keysTotal: keys.length, distinct, expected, lost: expected - distinct }
+}
+
+async function clean($) {
+  const raw = await $.store.keys()
+  const keys = Array.isArray(raw) ? raw : Object.keys(raw ?? {})
+  for (const k of keys) await $.store.delete(k)
+  return keys.length
+}
+
+export function register(on) {
+  on('session.start', async ($, e, next) => {
+    await $.command.register({ name: 'spike', description: 'agent-stoplight spike: claim races + latency', argumentHint: '<runId> <startAt> <dir> <race|solo>' })
+    await $.command.register({ name: 'spike-verify', description: 'agent-stoplight spike: count surviving distinct keys', argumentHint: '<runId> <expected>' })
+    await $.command.register({ name: 'spike-clean', description: 'agent-stoplight spike: wipe the spike store' })
+    return next(e)
+  })
+
+  on('command.run', { command: 'spike' }, async ($, e) => {
+    const [runId, startAt, dir, mode] = e.args.trim().split(/\s+/)
+    // `/spike verify <runId> <expected>` and `/spike clean` (hyphenated commands were not routed in -p runs)
+    if (runId === 'verify') return { text: 'verify ' + JSON.stringify(await verify($, startAt, Number(dir))) }
+    if (runId === 'clean') return { text: 'cleaned ' + (await clean($)) + ' keys' }
+    // `/spike mkparents <path>`: does $.fs.write create missing parent directories? does it overwrite?
+    if (runId === 'mkparents') {
+      try {
+        await $.fs.write(startAt, 'one')
+        await $.fs.write(startAt, 'two')
+        return { text: 'mkparents ok, read back: ' + (await $.fs.read(startAt)) }
+      } catch (err) {
+        return { text: 'mkparents FAILED: ' + String(err) }
+      }
+    }
+    try {
+      const out = await experiments($, { runId, startAt: Number(startAt), dir, mode: mode ?? 'solo' })
+      return { text: 'spike ok ' + JSON.stringify(out.summary) + ' latency ' + JSON.stringify(out.latency) }
+    } catch (err) {
+      return { text: 'spike FAILED: ' + String(err) + ' ' + (err && err.stack ? err.stack : '') }
+    }
+  })
+
+  on('command.run', { command: 'spike-verify' }, async ($, e) => {
+    const [runId, expected] = e.args.trim().split(/\s+/)
+    return { text: 'verify ' + JSON.stringify(await verify($, runId, Number(expected))) }
+  })
+
+  on('command.run', { command: 'spike-clean' }, async ($) => {
+    return { text: 'cleaned ' + (await clean($)) + ' keys' }
+  })
+}
