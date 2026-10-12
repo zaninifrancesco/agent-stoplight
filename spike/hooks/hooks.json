@@ -1,0 +1,4 @@
+{
+  "description": "agent-stoplight Phase 0 spike",
+  "modules": ["./register.js"]
+}
