@@ -58,3 +58,18 @@ No in-process primitive is perfectly atomic, and the one that is (a child proces
 5. **Never use `$.store` for leases.** Use it only for settings and history, with retries.
 6. **Staleness.** Lease files carry a timestamp. A heartbeat from `$.clock.every` refreshes the ones this session holds, and leases older than the TTL are ignored. Release on `session.end`.
 
+## Still open
+
+- Re-run the benchmark on macOS and Linux; confirm strict mode is viable there.
+- Whether `$.process.spawn` accepts stdin. If it does, a per-machine helper could give atomic claims at IPC speed. Not verified.
+- Bash writes (`sed -i`, `mv`, redirects) bypass `Edit`/`Write` interception. This is a Phase 3 problem.
+- Session liveness: `$.session.id()` identifies a session, but a crashed session is only detectable by lease TTL.
+- The exact field name carrying the file path on `Edit`/`Write` events (`e.file_path` per the docs' examples). Confirm from the generated types in an interactive `--plugin-dir` session.
+
+## Reproduce
+
+```bash
+export MSYS_NO_PATHCONV=1          # Git Bash on Windows only
+claude plugin validate ./spike
+bash spike/tools/race.sh myrun 6   # runs 6 sessions, prints the table above
+```
