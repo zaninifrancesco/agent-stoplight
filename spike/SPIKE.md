@@ -50,3 +50,11 @@ The racing was deliberately harsh: six sessions pounding the same 40 keys back t
 ## Conclusion
 
 No in-process primitive is perfectly atomic, and the one that is (a child process doing `mkdir`) costs 200–700 ms here. The design that fits the budget:
+
+1. **Held-by-me fast path, ~0 ms.** Keep the set of files this session holds in memory. A repeat edit costs nothing.
+2. **Check, ~0.3–3 ms.** For a file this session doesn't hold, `$.fs.exists` then `$.fs.read` on `<repo>/.claude/stoplight/leases/<hash>`. Live lease owned by someone else, so deny with an actionable message (🔴).
+3. **Claim, ~10–30 ms once per file.** `$.fs.write` the session id, wait ~10 ms, read it back, and proceed only if it is still ours. Last writer wins, so after both writes land, everyone reads the same winner. This is best-effort: it can double-grant only when two sessions claim the same new file within the same few milliseconds, which the stress test hit in about 1–2% of attempts. A double grant degrades to today's behaviour, no worse than running without the mod.
+4. **Optional strict mode.** Setting `strict: true` makes the claim an atomic `mkdir` through `$.process.run`, accepting ~200 ms+ on first touch of each file. Worth benchmarking on macOS/Linux, where spawning `mkdir` should be far cheaper.
+5. **Never use `$.store` for leases.** Use it only for settings and history, with retries.
+6. **Staleness.** Lease files carry a timestamp. A heartbeat from `$.clock.every` refreshes the ones this session holds, and leases older than the TTL are ignored. Release on `session.end`.
+
