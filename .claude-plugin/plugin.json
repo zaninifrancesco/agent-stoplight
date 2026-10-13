@@ -5,4 +5,30 @@
   "author": { "name": "agent-stoplight contributors" },
   "license": "MIT",
   "keywords": ["claude-code", "mod", "multi-agent", "file-locking", "concurrency"],
+  "userConfig": {
+    "strict": {
+      "type": "boolean",
+      "title": "Strict claims",
+      "description": "Claim files with an atomic mkdir: never two owners, but the first edit of each file is slower (about 200 ms on Windows). Turn it on in every session that shares the repository.",
+      "default": false
+    },
+    "hold": {
+      "type": "string",
+      "title": "Hold files for",
+      "description": "turn (default): while Claude works on a task, then 2 more minutes. idle: until a file goes 10 minutes untouched. session: until the session ends.",
+      "default": "turn"
+    },
+    "auto_resume": {
+      "type": "boolean",
+      "title": "Resume waiting sessions automatically",
+      "description": "When a session was refused a file, wake it up with a prompt as soon as the file is free, so it carries on without you. Each resume is one more Claude turn.",
+      "default": true
+    },
+    "guard_shell": {
+      "type": "boolean",
+      "title": "Guard shell commands",
+      "description": "Also refuse Bash and PowerShell commands that would write a file another session holds (redirects, tee, sed -i, mv, cp, rm, git checkout, Set-Content, ...). Best effort.",
+      "default": true
+    }
+  }
 }
