@@ -1,4 +1,7 @@
 node_modules/
+.claude/stoplight/
+spike/results/
+spike/claims/
 *.log
 .DS_Store
 Thumbs.db
