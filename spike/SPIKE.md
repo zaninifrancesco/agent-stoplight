@@ -22,3 +22,19 @@
 | Lease file: `$.fs.write`, read back after 25 ms | 39 / 40 | 1 | Near-atomic |
 
 The racing was deliberately harsh: six sessions pounding the same 40 keys back to back. Real collisions need two sessions to claim the same *new* file within tens of milliseconds.
+
+### Cost per call
+
+| Operation | Alone | 6 sessions at once |
+|---|---|---|
+| `$.process.run` → `cmd /c mkdir` (atomic claim) | ~200 ms | ~450 ms median, ~1 s p95 |
+| `$.process.run` → `node -e` mkdir | ~290 ms | ~730 ms median |
+| `$.fs.exists` | 0.27 ms | 0.5 ms |
+| `$.fs.read` | 1.5 ms | 2.8 ms |
+| `$.fs.write` | 2.8 ms | 8 ms |
+| `$.store.get` | 1.9 ms | 5.5 ms |
+| `$.store.set` | 29 ms | 179 ms |
+| Lease-file claim, new file (write + read back, 0–25 ms wait) | n/m | 30–67 ms median, ~200 ms p95 |
+| Lease-file check, file already leased (`exists`) | n/m | ~19 ms median |
+
+*n/m = not measured alone. A solo claim is roughly write + read-back (about 4 ms) plus the wait.*
