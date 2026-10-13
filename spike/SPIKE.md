@@ -38,3 +38,15 @@ The racing was deliberately harsh: six sessions pounding the same 40 keys back t
 | Lease-file check, file already leased (`exists`) | n/m | ~19 ms median |
 
 *n/m = not measured alone. A solo claim is roughly write + read-back (about 4 ms) plus the wait.*
+
+### Other findings
+
+- **`$.store.set` throws under cross-session contention**: `Lock file is already being held`. In the first run 5 of 6 sessions died on it. With 20 retries every write landed (33 of 240 writes needed a retry, at most 6 attempts), and no distinct-key write was lost (240 / 240). So the store is safe for per-session data with retries, and wrong for arbitration.
+- **`$.fs.write` is not atomic** (documented: it replaces content in place). Keep lease contents tiny, and treat an unparsable or partial read as "unknown, retry".
+- **`$.fs` has no mkdir, rename or exclusive-create.** The only atomic primitive reachable from a mod is a child process.
+- **Hook time limit** (10 s, `$.clock.sleep` counts, mods API calls don't) is not a concern for a claim path.
+- **Dev gotchas.** Git Bash rewrites a leading `/` in `claude -p "/spike …"` into a Windows path, so set `MSYS_NO_PATHCONV=1`. `--plugin-dir` needs a Windows path when `claude` is a native Windows binary. Hyphenated slash commands did not route in `-p` runs, hence `/spike verify` and `/spike clean`.
+
+## Conclusion
+
+No in-process primitive is perfectly atomic, and the one that is (a child process doing `mkdir`) costs 200–700 ms here. The design that fits the budget:
