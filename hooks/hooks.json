@@ -1,0 +1,4 @@
+{
+  "description": "agent-stoplight: file leases and a traffic-light band for parallel Claude Code sessions",
+  "modules": ["./register.js"]
+}
