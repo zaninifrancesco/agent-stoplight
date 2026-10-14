@@ -53,3 +53,18 @@ test('classify: free, mine, held, stale and released', () => {
   expect(classify({ ...peer, ts: 0 }, 'me', now)).toEqual({ state: 'free', reason: 'released' })
 })
 
+test('helpers: label, relative path, tool path field, age text', () => {
+  expect(labelFor('3f2a9c1e-5b7d')).toBe('s-3f2a')
+  expect(relPath('C:\\Repo', normalizePath('C:\\Repo\\src\\api.ts'))).toBe('src/api.ts')
+  expect(relPath('/repo', '/elsewhere/x.ts')).toBe('/elsewhere/x.ts')
+  expect(pathOf({ file_path: '/a' })).toBe('/a')
+  expect(pathOf({ notebook_path: '/n.ipynb' })).toBe('/n.ipynb')
+  expect(pathOf({})).toBe(null)
+  expect(ageText(4_000)).toBe('4s')
+  expect(ageText(120_000)).toBe('2m')
+  expect(ageText(2 * 3600_000)).toBe('2h')
+})
+
+test('denyMessage tells Claude what to do next', () => {
+  const msg = denyMessage('src/api.ts', { owner: 's-ab12', ageMs: 4_000 })
+  expect(msg).toContain('src/api.ts')
