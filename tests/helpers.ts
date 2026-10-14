@@ -38,3 +38,35 @@ export function session(on: any, root: string = ROOT) {
     toasts.push(e.text)
     return { value: undefined }
   })
+  on('ui.log', () => ({ value: undefined }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('session.send', ($: any, e: any) => {
+    sent.push({ to: String(e.to), text: e.text })
+    return { isDelivered: true }
+  })
+  // Prompts the mod submits to wake the session up. $.prompt.submit fires the prompt.submit event,
+  // so the stub answers with that event's result shape.
+  const prompts: string[] = []
+  on('prompt.submit', ($: any, e: any) => {
+    prompts.push(e.text)
+    return { text: e.text }
+  })
+  mock.env(on, {})
+  // What Claude Code itself does with a tool call that the mod lets through
+  on('tool.call', () => ({ result: 'tool ran' }))
+  return { sent, toasts, prompts }
+}
+
+export const leasePath = (file: string) => ROOT + '/.claude/stoplight/leases/' + leaseId(normalizePath(file)) + '.lease'
+export const peerLease = (file: string, ts: number) => encodeLease({ sid: PEER, label: 's-peee', ts, since: ts, path: normalizePath(file) })
+
+// The mod waits on the mock clock while claiming a lease, so the test must move time while the call is pending.
+export async function call($: any, clock: any, args: any) {
+  const pending = $.tool.call(args)
+  for (let i = 0; i < 8; i++) await clock.advance(10)
+  return pending
+}
+
+export async function start($: any, cwd: string = ROOT) {
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd })
+}
