@@ -38,3 +38,18 @@ test('a lease survives encode then decode, including a path with a tab', () => {
 test('decodeLease rejects partial or garbage content', () => {
   expect(decodeLease('')).toBe(null)
   expect(decodeLease('abc\ts-abc\t5000')).toBe(null)
+  expect(decodeLease('abc\ts-abc\tNaN\t1\t/p')).toBe(null)
+  expect(decodeLease(undefined)).toBe(null)
+})
+
+test('classify: free, mine, held, stale and released', () => {
+  const now = 1_000_000
+  const peer = { sid: 'peer', label: 's-peer', ts: now - 10_000, since: now - 60_000, path: '/p' }
+  expect(classify(null, 'me', now)).toEqual({ state: 'free' })
+  expect(classify({ ...peer, sid: 'me' }, 'me', now)).toEqual({ state: 'mine' })
+  expect(classify(peer, 'me', now)).toEqual({ state: 'held', owner: 's-peer', sid: 'peer', ageMs: 10_000, sinceMs: 60_000 })
+  expect(classify({ ...peer, ts: now - TTL_MS - 1 }, 'me', now).state).toBe('free')
+  expect(classify({ ...peer, ts: now - TTL_MS }, 'me', now).state).toBe('held')
+  expect(classify({ ...peer, ts: 0 }, 'me', now)).toEqual({ state: 'free', reason: 'released' })
+})
+
