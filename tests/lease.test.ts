@@ -24,3 +24,17 @@ test('normalizePath collapses dot segments and resolvePath anchors relative path
 
 test('leaseId is stable, 16 hex characters and different for different paths', () => {
   const a = leaseId('/repo/src/a.ts')
+  expect(a).toBe(leaseId('/repo/src/a.ts'))
+  expect(a).toMatch(/^[0-9a-f]{16}$/)
+  expect(a === leaseId('/repo/src/b.ts')).toBe(false)
+})
+
+test('a lease survives encode then decode, including a path with a tab', () => {
+  const text = encodeLease({ sid: 'abc', label: 's-abc', ts: 5000, since: 1000, path: '/repo/we\tird.ts' })
+  expect(text.includes('\n')).toBe(false)
+  expect(decodeLease(text)).toEqual({ sid: 'abc', label: 's-abc', ts: 5000, since: 1000, path: '/repo/we ird.ts' })
+})
+
+test('decodeLease rejects partial or garbage content', () => {
+  expect(decodeLease('')).toBe(null)
+  expect(decodeLease('abc\ts-abc\t5000')).toBe(null)
