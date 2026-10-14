@@ -48,3 +48,11 @@ export function normalizePath(p) {
   return (isAbsolute ? '/' : '') + parts.join('/')
 }
 
+// Claude often passes a relative path ("src/api.ts") and sometimes an absolute one for the same file.
+// Resolve against the session's working directory first, or the two would take different leases.
+export function resolvePath(cwd, p) {
+  const s = String(p).replace(/\\/g, '/')
+  const isAbsolute = s.startsWith('/') || /^[a-zA-Z]:\//.test(s)
+  return normalizePath(isAbsolute ? s : String(cwd).replace(/\\/g, '/').replace(/\/$/, '') + '/' + s)
+}
+
