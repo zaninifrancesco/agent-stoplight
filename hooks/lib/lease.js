@@ -70,3 +70,18 @@ export function leaseId(normalizedPath) {
   return fnv(normalizedPath, 2166136261).toString(16).padStart(8, '0') + fnv(normalizedPath, 0x9747b28c).toString(16).padStart(8, '0')
 }
 
+// One short line of tab-separated fields, so a single write is as close to atomic as it gets.
+export function encodeLease(l) {
+  return [l.sid, l.label, l.ts, l.since, l.path.replace(/[\t\r\n]/g, ' ')].join('\t')
+}
+
+export function decodeLease(text) {
+  if (typeof text !== 'string') return null
+  const parts = text.split('\t')
+  if (parts.length !== 5) return null
+  const ts = Number(parts[2])
+  const since = Number(parts[3])
+  if (!parts[0] || !Number.isFinite(ts) || !Number.isFinite(since) || !parts[4]) return null
+  return { sid: parts[0], label: parts[1], ts, since, path: parts[4] }
+}
+
