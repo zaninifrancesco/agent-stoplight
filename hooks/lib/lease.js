@@ -94,3 +94,17 @@ export function classify(lease, me, now, ttl = TTL_MS) {
   return { state: 'held', owner: lease.label, sid: lease.sid, ageMs: now - lease.ts, sinceMs: now - lease.since }
 }
 
+export function labelFor(sessionId) {
+  return 's-' + String(sessionId).replace(/[^a-zA-Z0-9]/g, '').slice(0, 4)
+}
+
+export function relPath(root, normalizedPath) {
+  const r = normalizePath(root).replace(/\/$/, '')
+  return normalizedPath.startsWith(r + '/') ? normalizedPath.slice(r.length + 1) : normalizedPath
+}
+
+// The file a write tool is about to change. Edit and Write use file_path, NotebookEdit uses notebook_path.
+export function pathOf(e) {
+  return e.file_path ?? e.notebook_path ?? e.path ?? null
+}
+
