@@ -33,3 +33,18 @@ export const IDLE_MS = 600_000
 export const RESUME_LIMIT = 3
 export const RESUME_WINDOW_MS = 30 * 60_000
 
+// Windows paths are case-insensitive and use either slash; make both spellings of a path equal.
+export function normalizePath(p) {
+  let s = String(p).replace(/\\/g, '/').replace(/\/+/g, '/')
+  if (/^[a-zA-Z]:\//.test(s)) s = s.toLowerCase()
+  // Collapse "." and ".." so two spellings of one file get one lease
+  const isAbsolute = s.startsWith('/')
+  const parts = []
+  for (const part of s.split('/')) {
+    if (part === '.' || part === '') continue
+    if (part === '..' && parts.length > 1 && parts[parts.length - 1] !== '..') parts.pop()
+    else parts.push(part)
+  }
+  return (isAbsolute ? '/' : '') + parts.join('/')
+}
+
