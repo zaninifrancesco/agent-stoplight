@@ -56,3 +56,17 @@ export function resolvePath(cwd, p) {
   return normalizePath(isAbsolute ? s : String(cwd).replace(/\\/g, '/').replace(/\/$/, '') + '/' + s)
 }
 
+function fnv(str, seed) {
+  let h = seed >>> 0
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i)
+    h = Math.imul(h, 16777619) >>> 0
+  }
+  return h
+}
+
+// 64 bits of FNV-1a (two seeds) as 16 hex characters: a stable file name for a path.
+export function leaseId(normalizedPath) {
+  return fnv(normalizedPath, 2166136261).toString(16).padStart(8, '0') + fnv(normalizedPath, 0x9747b28c).toString(16).padStart(8, '0')
+}
+
