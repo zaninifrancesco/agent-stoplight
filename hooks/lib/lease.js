@@ -85,3 +85,12 @@ export function decodeLease(text) {
   return { sid: parts[0], label: parts[1], ts, since, path: parts[4] }
 }
 
+// ts === 0 marks a released lease.
+export function classify(lease, me, now, ttl = TTL_MS) {
+  if (!lease) return { state: 'free' }
+  if (lease.sid === me) return { state: 'mine' }
+  if (lease.ts === 0) return { state: 'free', reason: 'released' }
+  if (now - lease.ts > ttl) return { state: 'free', reason: 'stale' }
+  return { state: 'held', owner: lease.label, sid: lease.sid, ageMs: now - lease.ts, sinceMs: now - lease.since }
+}
+
