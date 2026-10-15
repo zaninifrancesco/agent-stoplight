@@ -188,3 +188,38 @@ export function resumePrompt(items) {
   )
 }
 
+// Two sessions waiting on each other: the one with the larger id gives way. Both sides compute the
+// same answer without talking, so exactly one yields.
+export function shouldYield(me, other) {
+  return String(me) > String(other)
+}
+
+// Auto-resume budget per file: history is a list of timestamps of past resumes.
+export function canResume(history, now) {
+  return (history ?? []).filter((t) => now - t < RESUME_WINDOW_MS).length < RESUME_LIMIT
+}
+
+// Strict mode claims a lease by creating a lock directory, which only one process can do.
+// Its name depends on the lease state the claimant saw, so sessions that saw the same state race
+// for the same name and exactly one wins (a compare-and-swap on the file system).
+export function lockName(id, observedLease) {
+  return id + '@' + (observedLease ? leaseId(encodeLease(observedLease)) : '0') + '.lock'
+}
+
+export function mkdirArgv(path, isWindows) {
+  return isWindows ? ['cmd', '/c', 'mkdir', path.replace(/\//g, '\\')] : ['mkdir', path]
+}
+
+// ---------------------------------------------------------------------------------------------
+// Proximity: peers editing other files in the same directory get a yellow light, not a red one.
+
+export function dirOf(normalizedPath) {
+  const i = normalizedPath.lastIndexOf('/')
+  return i <= 0 ? '/' : normalizedPath.slice(0, i)
+}
+
+export function baseName(normalizedPath) {
+  return normalizedPath.slice(normalizedPath.lastIndexOf('/') + 1)
+}
+
+// peerLeases: [{ sid, label, path }] of live leases held by other sessions.
