@@ -253,3 +253,33 @@ export function decodeMessage(text) {
   const line = text.slice(at + MSG_PREFIX.length).split('\n')[0]
   try {
     const m = JSON.parse(line)
+    if (m.v !== 1 || !['waiting', 'released'].includes(m.kind) || typeof m.path !== 'string') return null
+    if (!m.from || typeof m.from.sid !== 'string' || typeof m.from.label !== 'string') return null
+    if (m.summary !== undefined && typeof m.summary !== 'string') return null
+    if (m.summary !== undefined) m.summary = clipSummary(m.summary)
+    return m
+  } catch {
+    return null
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Alerts: at most one is shown on the band, the most urgent one that hasn't expired.
+// alerts: { blocked?, waiting?, near?, freed? }, each { at, ... }
+
+const ALERT_ORDER = [
+  ['blocked', FLASH_MS],
+  ['resumed', FLASH_MS],
+  ['freed', FLASH_MS],
+  ['handed', FLASH_MS],
+  ['deadlock', FLASH_MS],
+  ['waiting', WAIT_ALERT_MS],
+  ['near', FLASH_MS],
+]
+
+export function pickAlert(alerts, now) {
+  for (const [kind, ttl] of ALERT_ORDER) {
+    const a = alerts[kind]
+    if (a && now - a.at < ttl) return { kind, ...a }
+  }
+  return null
