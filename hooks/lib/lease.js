@@ -323,3 +323,33 @@ function alertSegment(alert) {
     return { text: ' 🟡 ' + alert.who + ' is also editing in ' + alert.dir + '/ (' + alert.files.join(', ') + ') ', short: ' 🟡 ' + alert.who + ' nearby ', bg: 'yellow', color: 'black' }
   }
   if (alert.kind === 'queued') {
+    const more = alert.count > 1 ? ' +' + (alert.count - 1) : ''
+    return { text: ' ⏳ waiting for ' + alert.rel + more + ' (' + alert.owner + ') · resumes automatically ', short: ' ⏳ ' + file + more + ' ', bg: 'blue', color: 'white', bold: true }
+  }
+  if (alert.kind === 'deadlock') {
+    return { text: ' ↔ deadlock with ' + alert.who + ': handed over ' + alert.rel + ' ', short: ' ↔ ' + file + ' → ' + alert.who + ' ', bg: 'magenta', color: 'white', bold: true }
+  }
+  if (alert.kind === 'handed') {
+    return { text: ' ➜ handed ' + alert.rel + ' to ' + alert.who + ' ', short: ' ➜ ' + file + ' → ' + alert.who + ' ', bg: 'cyan', color: 'black', bold: true }
+  }
+  if (alert.kind === 'resumed') {
+    return { text: ' ▶ ' + alert.rel + ' is free: resuming the task ', short: ' ▶ ' + file + ' ', bg: 'green', color: 'black', bold: true }
+  }
+  return { text: ' 🟢 ' + alert.rel + ' is free again ', short: ' 🟢 ' + file + ' free ', bg: 'green', color: 'black', bold: true }
+}
+
+export function bandSegments(s, columns = 200) {
+  const out = [{ text: '🚦 stoplight', short: '🚦', bold: true }]
+  if (s.strict && !s.paused) out.push({ text: '🔒 strict', color: 'cyan', priority: 1 })
+  if (s.paused) {
+    out.push({ text: ' ⏸ paused · /stoplight resume ', short: ' ⏸ paused ', bg: 'yellow', color: 'black' })
+    return fitSegments(out, columns)
+  }
+  const countdown = s.mine > 0 && typeof s.freeInMs === 'number' ? ' · free in ' + countdownText(s.freeInMs) : ''
+  out.push(
+    s.mine > 0
+      ? { text: ' 🟢 ' + s.mine + ' yours' + countdown + ' ', short: ' 🟢 ' + s.mine + ' ', bg: 'green', color: 'black', bold: true }
+      : { text: '🟢 0 yours', short: '🟢 0', dim: true },
+  )
+  if (s.peers.length > 0) {
+    out.push({ text: ' 🟡 ' + s.peers.length + (s.peers.length === 1 ? ' peer ' : ' peers '), short: ' 🟡 ' + s.peers.length + ' ', bg: 'yellow', color: 'black', bold: true })
