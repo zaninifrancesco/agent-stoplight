@@ -283,3 +283,43 @@ export function pickAlert(alerts, now) {
     if (a && now - a.at < ttl) return { kind, ...a }
   }
   return null
+}
+
+export function pushEvent(events, event, max = 12) {
+  return [event, ...events].slice(0, max)
+}
+
+// ---------------------------------------------------------------------------------------------
+// The band above the prompt, as plain data so it can be tested without drawing.
+// Segment: { text, color?, bg?, dim?, bold?, priority? }. Lower priority is dropped first when narrow.
+
+// Terminal cells a string takes: pictographs are two cells wide, variation selectors none.
+export function cells(text) {
+  let n = 0
+  for (const ch of text) {
+    if (ch === '\uFE0F' || ch === '\u200D') continue
+    n += /\p{Extended_Pictographic}/u.test(ch) ? 2 : 1
+  }
+  return n
+}
+
+function truncateRight(text, maxCells) {
+  if (cells(text) <= maxCells) return text
+  const chars = [...text]
+  while (chars.length > 1 && cells(chars.join('') + '… ') > maxCells) chars.pop()
+  return chars.join('') + '… '
+}
+
+// Each alert has a long form and a `short` form for narrow terminals; both keep the file name.
+function alertSegment(alert) {
+  const file = baseName(alert.rel ?? '')
+  if (alert.kind === 'blocked') {
+    return { text: ' 🔴 BLOCKED ' + alert.rel + ' · held by ' + alert.owner + ' ' + ageText(alert.ageMs) + ' ago ', short: ' 🔴 ' + file + ' · ' + alert.owner + ' ', bg: 'red', color: 'white', bold: true }
+  }
+  if (alert.kind === 'waiting') {
+    return { text: ' 🔔 ' + alert.who + ' is waiting for ' + alert.rel + ' · /stoplight release ', short: ' 🔔 ' + alert.who + ' waits: ' + file + ' ', bg: 'yellow', color: 'black', bold: true }
+  }
+  if (alert.kind === 'near') {
+    return { text: ' 🟡 ' + alert.who + ' is also editing in ' + alert.dir + '/ (' + alert.files.join(', ') + ') ', short: ' 🟡 ' + alert.who + ' nearby ', bg: 'yellow', color: 'black' }
+  }
+  if (alert.kind === 'queued') {
