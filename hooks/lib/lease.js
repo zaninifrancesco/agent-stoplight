@@ -353,3 +353,52 @@ export function bandSegments(s, columns = 200) {
   )
   if (s.peers.length > 0) {
     out.push({ text: ' 🟡 ' + s.peers.length + (s.peers.length === 1 ? ' peer ' : ' peers '), short: ' 🟡 ' + s.peers.length + ' ', bg: 'yellow', color: 'black', bold: true })
+    out.push({ text: s.peers.map((p) => p.label + ' (' + p.files + ')').join(' · '), color: 'yellow', priority: 2 })
+  } else {
+    out.push({ text: '🟡 no peers', short: '🟡 0', dim: true })
+  }
+  out.push(
+    s.blockedCount > 0
+      ? { text: '🔴 ' + s.blockedCount + (s.blockedCount === 1 ? ' block' : ' blocks'), short: '🔴 ' + s.blockedCount, color: 'red' }
+      : { text: '🔴 0 blocks', short: '🔴 0', dim: true },
+  )
+  // A flash alert wins; otherwise a session that is waiting for a file says so for as long as it waits.
+  const shown = s.alert ?? (s.queued ? { kind: 'queued', ...s.queued } : null)
+  const alert = shown ? alertSegment(shown) : null
+  if (alert) out.push(alert)
+  else out.push({ text: '/stoplight', dim: true, priority: 1 })
+  return fitSegments(out, columns)
+}
+
+const GAP = 2
+
+export function fitSegments(segments, columns) {
+  let list = [...segments]
+  const width = (l) => l.reduce((n, s) => n + cells(s.text), 0) + GAP * Math.max(0, l.length - 1)
+  while (width(list) > columns) {
+    const droppable = list.filter((s) => s.priority !== undefined)
+    if (droppable.length === 0) break
+    const lowest = droppable.reduce((a, b) => (a.priority <= b.priority ? a : b))
+    list = list.filter((s) => s !== lowest)
+  }
+  // Still too wide: switch to short forms, the alert first (it has the most text), then the counters.
+  const order = [list.length - 1, ...list.map((_, i) => i).slice(0, -1).reverse()]
+  for (const i of order) {
+    if (width(list) <= columns) break
+    if (list[i].short) list = list.map((s, j) => (j === i ? { ...s, text: s.short } : s))
+  }
+  if (width(list) > columns) {
+    // Last resort: cut the alert's end. Its start holds the light and the file name.
+    const last = list[list.length - 1]
+    const room = columns - (width(list) - cells(last.text))
+    list = [...list.slice(0, -1), { ...last, text: truncateRight(last.text, Math.max(6, room)) }]
+  }
+  return list.map(({ short, priority, ...s }) => s)
+}
+
+// Rows for the /stoplight board: [{ light, rel, owner, ageMs, waiters }]
+export function boardRows(rows) {
+  return [...rows]
+    .sort((a, b) => Number(b.mine) - Number(a.mine) || a.rel.localeCompare(b.rel))
+    .map((r) => ({ light: r.mine ? '🟢' : '🔴', rel: r.rel, owner: r.mine ? 'you' : r.owner, ageMs: r.ageMs, waiters: r.waiters ?? [] }))
+}
