@@ -108,3 +108,33 @@ export function pathOf(e) {
   return e.file_path ?? e.notebook_path ?? e.path ?? null
 }
 
+export function ageText(ms) {
+  const s = Math.max(0, Math.round(ms / 1000))
+  if (s < 90) return s + 's'
+  const m = Math.round(s / 60)
+  return m < 90 ? m + 'm' : Math.round(m / 60) + 'h'
+}
+
+// What Claude should do while it waits: with auto-resume it can simply stop, the mod wakes it up.
+function waitAdvice(autoResume, one) {
+  return autoResume
+    ? 'Work on something else that does not need ' + (one ? 'it' : 'them') + '. If you cannot continue without ' + (one ? 'it' : 'them') +
+        ', end your turn now with one short line saying what you are waiting for: agent-stoplight will resume you automatically as soon as ' +
+        (one ? 'it is' : 'they are') + ' free. Do not try to change ' + (one ? 'it' : 'them') + ' another way.'
+    : 'Work on a different file, or tell the user ' + (one ? 'it is' : 'they are') + ' locked and try again later.'
+}
+
+// Written for Claude, so it says what to do next rather than just "denied".
+export function denyMessage(rel, held, autoResume = false) {
+  return (
+    'agent-stoplight: ' + rel + ' is locked by another Claude Code session (' + held.owner + ', active ' + ageText(held.ageMs) + ' ago) and was not changed. ' +
+    'Do not edit it now. ' + waitAdvice(autoResume, true)
+  )
+}
+
+// For a shell command that would touch locked files. items: [{ rel, owner, ageMs }]
+export function shellDenyMessage(items, autoResume = false) {
+  const list = items.map((i) => i.rel + ' (locked by ' + i.owner + ', active ' + ageText(i.ageMs) + ' ago)').join(', ')
+  const one = items.length === 1
+  return (
+    'agent-stoplight: this command was not run because it would change ' + list + ', held by another Claude Code session. ' +
