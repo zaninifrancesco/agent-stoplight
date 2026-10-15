@@ -223,3 +223,33 @@ export function baseName(normalizedPath) {
 }
 
 // peerLeases: [{ sid, label, path }] of live leases held by other sessions.
+// Resolves to [{ sid, label, files: [basename, ...] }] for peers with files beside this one.
+export function nearbyPeers(normalizedPath, peerLeases) {
+  const dir = dirOf(normalizedPath)
+  const bySession = new Map()
+  for (const l of peerLeases) {
+    if (l.path === normalizedPath || dirOf(l.path) !== dir) continue
+    const entry = bySession.get(l.sid) ?? { sid: l.sid, label: l.label, files: [] }
+    entry.files.push(baseName(l.path))
+    bySession.set(l.sid, entry)
+  }
+  return [...bySession.values()]
+}
+
+// ---------------------------------------------------------------------------------------------
+// Messages between sessions. First line is machine-readable, second line is for a human (or for
+// Claude, if a session without this mod ever receives one).
+
+export function encodeMessage(msg, human) {
+  return MSG_PREFIX + JSON.stringify({ v: 1, ...msg }) + '\n' + human
+}
+
+// Claude Code may wrap a delivered message (for example with a line naming the sender), so the marker
+// is looked for anywhere in the text, not only at the start.
+export function decodeMessage(text) {
+  if (typeof text !== 'string') return null
+  const at = text.indexOf(MSG_PREFIX)
+  if (at < 0) return null
+  const line = text.slice(at + MSG_PREFIX.length).split('\n')[0]
+  try {
+    const m = JSON.parse(line)
