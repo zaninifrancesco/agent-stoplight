@@ -83,3 +83,23 @@ test('band: pills for each light, one alert at a time, paused', () => {
   const withPeers = bandSegments({ ...base, peers: [{ label: 's-ab12', files: 3 }, { label: 's-cd34', files: 1 }] })
   expect(text(withPeers)).toContain(' 🟡 2 peers  | s-ab12 (3) · s-cd34 (1)')
   expect(withPeers.find((s) => s.text.startsWith(' 🟡'))?.bg).toBe('yellow')
+
+  const blocked = bandSegments({ ...base, blockedCount: 1, alert: { kind: 'blocked', at: 95_000, rel: 'src/api.ts', owner: 's-ab12', ageMs: 4_000 } })
+  const pill = blocked[blocked.length - 1]
+  expect(pill.text).toBe(' 🔴 BLOCKED src/api.ts · held by s-ab12 4s ago ')
+  expect(pill.bg).toBe('red')
+  // The hint gives way to the alert
+  expect(text(blocked)).not.toContain('/stoplight')
+
+  expect(text(bandSegments({ ...base, alert: { kind: 'waiting', at: 0, who: 's-ab12', rel: 'src/api.ts' } }))).toContain('🔔 s-ab12 is waiting for src/api.ts · /stoplight release')
+  expect(text(bandSegments({ ...base, alert: { kind: 'near', at: 0, who: 's-ab12', dir: 'src', files: ['db.ts'] } }))).toContain('🟡 s-ab12 is also editing in src/ (db.ts)')
+  expect(text(bandSegments({ ...base, alert: { kind: 'freed', at: 0, rel: 'src/api.ts' } }))).toContain('🟢 src/api.ts is free again')
+
+  expect(text(bandSegments({ ...base, paused: true }))).toContain('⏸ paused')
+})
+
+test('band fits narrow terminals and never drops the blocked file name', () => {
+  const state = {
+    mine: 2,
+    peers: [{ label: 's-ab12', files: 3 }, { label: 's-cd34', files: 1 }],
+    blockedCount: 1,
