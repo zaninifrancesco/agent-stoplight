@@ -68,3 +68,18 @@ test('helpers: label, relative path, tool path field, age text', () => {
 test('denyMessage tells Claude what to do next', () => {
   const msg = denyMessage('src/api.ts', { owner: 's-ab12', ageMs: 4_000 })
   expect(msg).toContain('src/api.ts')
+  expect(msg).toContain('s-ab12')
+  expect(msg).toContain('Work on a different file')
+})
+
+test('band: pills for each light, one alert at a time, paused', () => {
+  const base = { mine: 2, peers: [] as { label: string; files: number }[], blockedCount: 0, paused: false, now: 100_000, alert: null as any }
+  const text = (s: ReturnType<typeof bandSegments>) => s.map((x) => x.text).join(' | ')
+
+  expect(text(bandSegments(base))).toBe('🚦 stoplight |  🟢 2 yours  | 🟡 no peers | 🔴 0 blocks | /stoplight')
+  expect(bandSegments(base)[1].bg).toBe('green')
+  expect(text(bandSegments({ ...base, mine: 0 }))).toContain('🟢 0 yours')
+
+  const withPeers = bandSegments({ ...base, peers: [{ label: 's-ab12', files: 3 }, { label: 's-cd34', files: 1 }] })
+  expect(text(withPeers)).toContain(' 🟡 2 peers  | s-ab12 (3) · s-cd34 (1)')
+  expect(withPeers.find((s) => s.text.startsWith(' 🟡'))?.bg).toBe('yellow')
