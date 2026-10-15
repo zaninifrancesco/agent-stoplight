@@ -138,3 +138,23 @@ export function shellDenyMessage(items, autoResume = false) {
   const one = items.length === 1
   return (
     'agent-stoplight: this command was not run because it would change ' + list + ', held by another Claude Code session. ' +
+    'Do not change ' + (one ? 'that file' : 'those files') + ' now. ' + waitAdvice(autoResume, one)
+  )
+}
+
+// ---------------------------------------------------------------------------------------------
+// Hold policy: when does a session let go of its files?
+// held: [{ id, lastUsed }]. Resolves to the ids due for release now.
+export function dueForRelease(held, { mode, inTurn, turnEndedAt, now }) {
+  if (mode === 'session') return []
+  if (mode === 'turn' && !inTurn && turnEndedAt > 0 && now - turnEndedAt >= GRACE_MS) return held.map((h) => h.id)
+  return held.filter((h) => now - h.lastUsed >= IDLE_MS).map((h) => h.id)
+}
+
+// Milliseconds until every file goes back, for the countdown on the band; null when nothing is counting down.
+export function releaseInMs({ mode, inTurn, turnEndedAt, now, held }) {
+  if (held === 0 || mode !== 'turn' || inTurn || !(turnEndedAt > 0)) return null
+  return Math.max(0, GRACE_MS - (now - turnEndedAt))
+}
+
+export function countdownText(ms) {
