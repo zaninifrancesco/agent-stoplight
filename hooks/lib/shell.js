@@ -103,3 +103,38 @@ function commands(tokens) {
   }
   out.push(cur)
   return out.filter((c) => c.words.length > 0 || c.redirects.length > 0)
+}
+
+const isOption = (w) => w.length > 1 && w.startsWith('-')
+const positionals = (words) => {
+  const out = []
+  let afterDashes = false
+  for (const w of words) {
+    if (!afterDashes && w === '--') afterDashes = true
+    else if (afterDashes || !isOption(w)) out.push(w)
+  }
+  return out
+}
+
+// Options that take a value, per command, so the value isn't mistaken for a file
+const VALUE_OPTIONS = {
+  sed: ['-e', '-f', '-l', '--expression', '--file'],
+  perl: ['-e', '-E', '-M', '-I'],
+  truncate: ['-s', '-r', '--size', '--reference'],
+  cp: ['-t', '--target-directory', '-S', '--suffix'],
+  mv: ['-t', '--target-directory', '-S', '--suffix'],
+  install: ['-t', '-m', '-o', '-g', '--mode', '--owner', '--group', '--target-directory'],
+  tee: [],
+  git: ['-C', '-c', '-s', '--source'],
+}
+
+function stripValues(cmd, words) {
+  const takes = VALUE_OPTIONS[cmd] ?? []
+  const kept = []
+  const values = {}
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i]
+    const eq = w.indexOf('=')
+    if (w.startsWith('--') && eq > 0 && takes.includes(w.slice(0, eq))) {
+      ;(values[w.slice(0, eq)] ??= []).push(w.slice(eq + 1))
+    } else if (takes.includes(w)) {
