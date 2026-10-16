@@ -18,3 +18,18 @@ test('redirects and tee', () => {
   expect(bash('echo hi >> notes.md')).toEqual(['notes.md'])
   expect(bash('npm test 2>&1 | tee build.log')).toEqual(['build.log'])
   expect(bash('tee -a one.txt two.txt < input')).toEqual(['one.txt', 'two.txt'])
+  expect(bash('ls > /dev/null 2>&1')).toEqual([])
+  expect(bash('cat < input.txt')).toEqual([])
+  expect(bash('echo "a > b"')).toEqual([])
+})
+
+test('in-place editors: sed -i and perl -i, but not plain sed', () => {
+  expect(bash("sed -i 's/hello/goodbye/' src/api.ts src/ui.ts")).toEqual(['src/api.ts', 'src/ui.ts'])
+  expect(bash("sed -i.bak -e 's/a/b/' -e 's/c/d/' src/db.ts")).toEqual(['src/db.ts'])
+  expect(bash("sed --in-place 's/a/b/' x.txt")).toEqual(['x.txt'])
+  expect(bash("sed 's/a/b/' src/db.ts")).toEqual([])
+  expect(bash("perl -pi -e 's/x/y/' a.pl b.pl")).toEqual(['a.pl', 'b.pl'])
+  expect(bash("perl -ne 'print' a.pl")).toEqual([])
+})
+
+test('file management: mv, cp, rm, touch, truncate, ln, dd', () => {
