@@ -48,3 +48,34 @@ export function tokenize(command, escape = '\\') {
         continue
       }
       push()
+      const two = s.slice(i, i + 2)
+      tokens.push({ type: 'op', text: two === '&&' || two === '||' ? two : c })
+      if (two === '&&' || two === '||') i++
+      continue
+    }
+    if (c === '>' || c === '<') {
+      // A leading fd number belongs to the redirect: 2>file
+      const fd = inWord && /^\d$/.test(word) ? word : ''
+      if (fd) {
+        word = ''
+        inWord = false
+      } else push()
+      let op = c
+      if (s[i + 1] === '>' || s[i + 1] === '|') op += s[++i]
+      if (s[i + 1] === '&') {
+        // >&2 or 2>&1: duplication, read the fd and move on
+        i++
+        let dup = ''
+        while (/\d/.test(s[i + 1] ?? '')) dup += s[++i]
+        if (dup) continue
+        op = '&' + op
+      }
+      tokens.push({ type: c === '>' ? 'redir' : 'in', text: fd + op })
+      continue
+    }
+    word += c
+    inWord = true
+  }
+  push()
+  return tokens
+}
