@@ -13,3 +13,38 @@ export function tokenize(command, escape = '\\') {
   let inWord = false
   let quote = ''
   const s = String(command)
+  const push = () => {
+    if (inWord) tokens.push({ type: 'word', text: word })
+    word = ''
+    inWord = false
+  }
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i]
+    if (quote) {
+      if (c === quote) quote = ''
+      else if (c === escape && quote === '"' && i + 1 < s.length) word += s[++i]
+      else word += c
+      continue
+    }
+    if (c === "'" || c === '"') {
+      quote = c
+      inWord = true
+      continue
+    }
+    if (c === escape && i + 1 < s.length) {
+      word += s[++i]
+      inWord = true
+      continue
+    }
+    if (c === ' ' || c === '\t') {
+      push()
+      continue
+    }
+    if (c === '\n' || c === ';' || c === '|' || c === '&') {
+      // 2>&1, >&2: a file-descriptor duplication, not a separator
+      if (c === '&' && (s[i - 1] === '>' || s[i - 1] === '<')) {
+        word += c
+        inWord = true
+        continue
+      }
+      push()
