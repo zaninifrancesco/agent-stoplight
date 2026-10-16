@@ -173,3 +173,43 @@ function bashTargets(c) {
   if (cmd === 'truncate') return targets.concat(positionals(stripValues('truncate', args).kept))
   if (cmd === 'mv') {
     const { kept, values } = stripValues('mv', args)
+    return targets.concat(positionals(kept), values['-t'] ?? [], values['--target-directory'] ?? [])
+  }
+  if (cmd === 'cp' || cmd === 'install' || cmd === 'ln') {
+    const { kept, values } = stripValues(cmd === 'ln' ? 'cp' : cmd, args)
+    const dir = values['-t'] ?? values['--target-directory']
+    if (dir) return targets.concat(dir)
+    const pos = positionals(kept)
+    return targets.concat(pos.length > 1 ? [pos[pos.length - 1]] : [])
+  }
+  if (cmd === 'dd') return targets.concat(args.filter((a) => a.startsWith('of=')).map((a) => a.slice(3)))
+  if (cmd === 'git') {
+    const { kept } = stripValues('git', args)
+    const sub = kept.find((w) => !isOption(w))
+    const rest = kept.slice(kept.indexOf(sub) + 1)
+    if (sub === 'checkout') {
+      const dd = rest.indexOf('--')
+      return targets.concat(dd >= 0 ? rest.slice(dd + 1) : [])
+    }
+    if (sub === 'restore' || sub === 'rm' || sub === 'mv') return targets.concat(positionals(rest))
+    return targets
+  }
+  if (cmd === 'prettier' && args.some((a) => a === '--write' || a === '-w')) return targets.concat(positionals(args))
+  return targets
+}
+
+// PowerShell: cmdlets and their aliases, parameters by name or by position.
+const PS = {
+  'set-content': 'path', sc: 'path', 'add-content': 'path', ac: 'path', 'clear-content': 'path', clc: 'path',
+  'out-file': 'filepath', 'new-item': 'path', ni: 'path',
+  'remove-item': 'path', ri: 'path', rm: 'path', del: 'path', erase: 'path', rd: 'path', rmdir: 'path',
+  'move-item': 'move', mi: 'move', mv: 'move', move: 'move',
+  'copy-item': 'copy', ci: 'copy', cp: 'copy', copy: 'copy', cpi: 'copy',
+  'rename-item': 'rename', ren: 'rename', rni: 'rename',
+}
+const PS_VALUE_PARAMS = ['-path', '-literalpath', '-filepath', '-destination', '-newname', '-value', '-encoding', '-itemtype', '-name', '-filter', '-include', '-exclude', '-credential', '-stream', '-width']
+
+function psTargets(c) {
+  const targets = [...c.redirects]
+  if (c.words.length === 0) return targets
+  const cmd = c.words[0].toLowerCase()
