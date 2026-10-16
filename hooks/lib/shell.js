@@ -138,3 +138,38 @@ function stripValues(cmd, words) {
     if (w.startsWith('--') && eq > 0 && takes.includes(w.slice(0, eq))) {
       ;(values[w.slice(0, eq)] ??= []).push(w.slice(eq + 1))
     } else if (takes.includes(w)) {
+      ;(values[w] ??= []).push(words[i + 1])
+      i++
+    } else kept.push(w)
+  }
+  return { kept, values }
+}
+
+const WRAPPERS = new Set(['sudo', 'command', 'env', 'time', 'nohup', 'nice', 'exec', 'builtin', 'doas'])
+
+function bashTargets(c) {
+  let words = [...c.words]
+  // Drop wrappers and leading VAR=value assignments
+  while (words.length > 0 && (WRAPPERS.has(words[0]) || /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0]))) words.shift()
+  const targets = [...c.redirects]
+  if (words.length === 0) return targets
+  const cmd = words[0].replace(/^.*[\\/]/, '').replace(/\.exe$/i, '')
+  const args = words.slice(1)
+
+  if (cmd === 'tee') return targets.concat(positionals(args))
+  if (cmd === 'sed' || cmd === 'gsed') {
+    if (!args.some((a) => /^-[a-zA-Z]*i/.test(a) || a.startsWith('--in-place'))) return targets
+    const { kept, values } = stripValues('sed', args)
+    const pos = positionals(kept)
+    return targets.concat(values['-e'] || values['-f'] || values['--expression'] || values['--file'] ? pos : pos.slice(1))
+  }
+  if (cmd === 'perl') {
+    if (!args.some((a) => /^-[a-zA-Z]*i/.test(a))) return targets
+    const { kept, values } = stripValues('perl', args)
+    const pos = positionals(kept)
+    return targets.concat(values['-e'] || values['-E'] ? pos : pos.slice(1))
+  }
+  if (['rm', 'touch', 'unlink', 'shred', 'rmdir', 'mkdir'].includes(cmd)) return targets.concat(positionals(args))
+  if (cmd === 'truncate') return targets.concat(positionals(stripValues('truncate', args).kept))
+  if (cmd === 'mv') {
+    const { kept, values } = stripValues('mv', args)
