@@ -79,3 +79,27 @@ export function tokenize(command, escape = '\\') {
   push()
   return tokens
 }
+
+// Group tokens into simple commands: { words: [...], redirects: [target, ...] }
+function commands(tokens) {
+  const out = []
+  let cur = { words: [], redirects: [] }
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i]
+    if (t.type === 'op') {
+      out.push(cur)
+      cur = { words: [], redirects: [] }
+    } else if (t.type === 'redir') {
+      const next = tokens[i + 1]
+      if (next && next.type === 'word') {
+        cur.redirects.push(next.text)
+        i++
+      }
+    } else if (t.type === 'in') {
+      i++ // < file: read, not written
+    } else {
+      cur.words.push(t.text)
+    }
+  }
+  out.push(cur)
+  return out.filter((c) => c.words.length > 0 || c.redirects.length > 0)
