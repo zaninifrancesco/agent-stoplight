@@ -33,3 +33,50 @@ test('in-place editors: sed -i and perl -i, but not plain sed', () => {
 })
 
 test('file management: mv, cp, rm, touch, truncate, ln, dd', () => {
+  expect(bash('mv old.ts new.ts')).toEqual(['old.ts', 'new.ts'])
+  expect(bash('mv -t dest a.ts b.ts')).toEqual(['a.ts', 'b.ts', 'dest'])
+  expect(bash('cp -r template/ out/')).toEqual(['out/'])
+  expect(bash('cp a.ts')).toEqual([])
+  expect(bash('rm -f old.txt other.txt')).toEqual(['old.txt', 'other.txt'])
+  expect(bash('touch new.ts')).toEqual(['new.ts'])
+  expect(bash('truncate -s 0 big.log')).toEqual(['big.log'])
+  expect(bash('ln -sf target link')).toEqual(['link'])
+  expect(bash('dd if=/dev/zero of=disk.img bs=1M count=1')).toEqual(['disk.img'])
+})
+
+test('git commands that rewrite working-tree files', () => {
+  expect(bash('git checkout -- src/api.ts')).toEqual(['src/api.ts'])
+  expect(bash('git checkout main')).toEqual([])
+  expect(bash('git restore --staged src/ui.ts')).toEqual(['src/ui.ts'])
+  expect(bash('git rm -r --cached build')).toEqual(['build'])
+  expect(bash('git -C sub mv a.ts b.ts')).toEqual(['a.ts', 'b.ts'])
+  expect(bash('git status')).toEqual([])
+})
+
+test('wrappers, assignments, chains and cd', () => {
+  expect(bash('FOO=1 sudo tee /etc/hosts')).toEqual(['/etc/hosts'])
+  expect(bash('npm run build && echo done > status.txt; rm tmp.txt')).toEqual(['status.txt', 'tmp.txt'])
+  const t = shellTargets('cd src && mv api.ts api2.ts', 'Bash', '/repo')
+  expect(t.map((x: any) => x.cwd + ' ' + x.path)).toEqual(['/repo/src api.ts', '/repo/src api2.ts'])
+})
+
+test('what it deliberately leaves alone: globs, variables, home paths, other languages', () => {
+  expect(bash('rm -rf build/*.o')).toEqual([])
+  expect(bash('echo x > $OUT')).toEqual([])
+  expect(bash('rm ~/notes.txt')).toEqual([])
+  expect(bash('python -c "open(\'x\',\'w\')"')).toEqual([])
+  expect(bash('ls -la')).toEqual([])
+})
+
+test('PowerShell cmdlets, aliases, named and positional parameters', () => {
+  expect(ps("Set-Content -Path src\\api.ts -Value 'x'")).toEqual(['src\\api.ts'])
+  expect(ps("'x' | Out-File notes.txt")).toEqual(['notes.txt'])
+  expect(ps("Add-Content log.txt 'line'")).toEqual(['log.txt'])
+  expect(ps('Move-Item a.txt b.txt; Remove-Item -LiteralPath "c d.txt"')).toEqual(['a.txt', 'b.txt', 'c d.txt'])
+  expect(ps('Copy-Item -Path a.txt -Destination out\\a.txt')).toEqual(['out\\a.txt'])
+  expect(ps('Rename-Item -Path src\\api.ts -NewName api2.ts')).toEqual(['src\\api.ts', 'src/api2.ts'])
+  expect(ps('del old.txt')).toEqual(['old.txt'])
+  expect(ps('Get-Content x.txt > y.txt')).toEqual(['y.txt'])
+  expect(ps('Get-ChildItem -Recurse')).toEqual([])
+  expect(ps('Remove-Item *.log')).toEqual([])
+})
