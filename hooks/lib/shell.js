@@ -253,3 +253,19 @@ const looksLikePath = (p) =>
 // changes it. Resolves to [{ path, cwd }] with path as written in the command.
 export function shellTargets(command, tool = 'Bash', cwd = '') {
   const isPs = tool === 'PowerShell'
+  const out = []
+  let dir = cwd
+  for (const c of commands(tokenize(command, isPs ? '`' : '\\'))) {
+    const head = (c.words[0] ?? '').toLowerCase()
+    if ((head === 'cd' || head === 'set-location' || head === 'pushd') && c.words[1] && looksLikePath(c.words[1])) {
+      const to = c.words[1].replace(/\\/g, '/')
+      dir = to.startsWith('/') || /^[a-zA-Z]:\//.test(to) ? to : dir.replace(/[\\/]$/, '') + '/' + to
+      continue
+    }
+    for (const p of isPs ? psTargets(c) : bashTargets(c)) {
+      if (looksLikePath(p)) out.push({ path: p, cwd: dir })
+      if (out.length >= MAX_TARGETS) return out
+    }
+  }
+  return out
+}
