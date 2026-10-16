@@ -213,3 +213,43 @@ function psTargets(c) {
   const targets = [...c.redirects]
   if (c.words.length === 0) return targets
   const cmd = c.words[0].toLowerCase()
+  const kind = PS[cmd]
+  if (!kind) return targets
+  const named = {}
+  const pos = []
+  const args = c.words.slice(1)
+  for (let i = 0; i < args.length; i++) {
+    const w = args[i]
+    const lower = w.toLowerCase()
+    if (w.startsWith('-') && w.length > 1) {
+      const colon = lower.indexOf(':')
+      if (colon > 0) named[lower.slice(0, colon)] = w.slice(colon + 1)
+      else if (PS_VALUE_PARAMS.includes(lower)) {
+        named[lower] = args[i + 1]
+        i++
+      }
+      continue
+    }
+    pos.push(w)
+  }
+  const pathArg = named['-path'] ?? named['-literalpath'] ?? named['-filepath'] ?? pos[0]
+  const list = (v) => (v === undefined ? [] : String(v).split(',').map((x) => x.trim()).filter(Boolean))
+  if (kind === 'path' || kind === 'filepath') return targets.concat(list(pathArg))
+  if (kind === 'move') return targets.concat(list(pathArg), list(named['-destination'] ?? pos[1]))
+  if (kind === 'copy') return targets.concat(list(named['-destination'] ?? pos[1]))
+  if (kind === 'rename') {
+    const from = list(pathArg)
+    const to = named['-newname'] ?? pos[1]
+    const dir = from[0] && /[\\/]/.test(from[0]) ? from[0].replace(/[\\/][^\\/]*$/, '') + '/' : ''
+    return targets.concat(from, to ? [dir + to] : [])
+  }
+  return targets
+}
+
+const looksLikePath = (p) =>
+  typeof p === 'string' && p.length > 0 && !NULL_DEVICES.has(p.toLowerCase()) && !/[*?[\]$`{}]/.test(p) && !p.startsWith('~') && !/^[a-z]+:\/\//i.test(p)
+
+// The files a command would write, relative paths resolved against `cwd` as each `cd` in the command
+// changes it. Resolves to [{ path, cwd }] with path as written in the command.
+export function shellTargets(command, tool = 'Bash', cwd = '') {
+  const isPs = tool === 'PowerShell'
