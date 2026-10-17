@@ -548,3 +548,88 @@ export function register(on, options) {
       argumentHint: '[release|status|hold turn|auto off|strict on|shell off]',
     })
     return next(e)
+  })
+
+  // Files are held for the length of the main conversation's turn (subagent turns don't count).
+  on('turn.start', async ($, e, next) => {
+    if (traceOn) await note($, '·', 'turn.start ' + e.turnId + (e.agentId ? ' agent ' + e.agentId : ''))
+    if (!e.agentId) {
+      inTurn = true
+      activeTurn = e.turnId ?? null
+      redraw($)
+    }
+    return next(e)
+  })
+
+  // Every tool call, from Claude or a subagent, means this session is busy right now
+  on('tool.call', async ($, e, next) => {
+    lastToolAt = await $.clock.now()
+    return next(e)
+  })
+
+  on('turn.complete', async ($, e, next) => {
+    if (traceOn) await note($, '·', 'turn.complete ' + e.turnId + (e.agentId ? ' agent ' + e.agentId : '') + (e.isAborted ? ' aborted' : '') + (e.turnId !== activeTurn ? ' (not the active turn ' + activeTurn + ')' : ''))
+    // Only the end of the turn we saw start counts as the end of our task. An end with no start seen
+    // still stops the "in turn" state (so files go back after the grace period) but never hands over early.
+    const isOurs = !e.agentId && activeTurn !== null && e.turnId === activeTurn
+    const isUnmatched = !e.agentId && activeTurn === null
+    if (isOurs || isUnmatched) {
+      activeTurn = null
+      inTurn = false
+      turnEndedAt = await $.clock.now()
+      if (typeof e.answer === 'string' && e.answer.trim()) lastSummary = clipSummary(e.answer)
+      // Files someone is waiting for go to them right away; the rest keep the grace period
+      if (isOurs && holdMode !== 'session' && !e.isAborted) {
+        try {
+          await handOver($, [...waiters.keys()])
+        } catch {
+          // The grace-period release still happens on the next tick
+        }
+      }
+      redraw($)
+    }
+    return next(e)
+  })
+
+  // The guard. Fails open: if anything goes wrong the edit is allowed and a dim line says why.
+  on('tool.call', { tool: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'] }, async ($, e, next) => {
+    const target = pathOf(e)
+    if (isPaused || !target || !me) return next(e)
+    const norm = resolvePath(cwd, target)
+    const rel = relPath(root, norm)
+    let verdict = { state: 'mine', isNew: false }
+    try {
+      verdict = await acquire($, norm)
+    } catch (err) {
+      $.ui.log('agent-stoplight: could not check the lease, letting the edit through (' + String(err).slice(0, 100) + ')')
+      return next(e)
+    }
+
+    if (verdict.state === 'held') {
+      alerts.blocked = { at: await $.clock.now(), rel, owner: verdict.owner, ageMs: verdict.ageMs }
+      blockedCount += 1
+      $.ui.toast('🔴 ' + rel + ' is locked by ' + verdict.owner + (autoResume && canWakeHere ? ' · waiting in line, resumes by itself' : ''))
+      await note($, '🔴', 'blocked ' + rel + ' (held by ' + verdict.owner + ')')
+      redraw($)
+      expireLater($, FLASH_MS)
+      await wait($, [{ norm, rel, owner: verdict.owner, sid: verdict.sid }])
+      return { deny: denyMessage(rel, verdict, autoResume && canWakeHere) }
+    }
+
+    waitingFor.delete(norm)
+    if (verdict.isNew) {
+      await note($, '🟢', 'took ' + rel)
+      const near = nearbyPeers(norm, peerLeases)
+      if (near.length > 0) {
+        const who = near.map((p) => p.label).join(', ')
+        const files = near.flatMap((p) => p.files).slice(0, 3)
+        alerts.near = { at: await $.clock.now(), who, dir: relPath(root, dirOf(norm)), files }
+        $.ui.toast('🟡 ' + who + ' is also editing in ' + relPath(root, dirOf(norm)) + '/ (' + files.join(', ') + ')')
+        await note($, '🟡', who + ' is editing next to ' + rel)
+        expireLater($, FLASH_MS)
+      }
+      redraw($)
+    }
+    return next(e)
+  }).catch(async ($, e, next) => next(e))
+
