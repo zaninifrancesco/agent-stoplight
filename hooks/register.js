@@ -248,3 +248,23 @@ async function release($, ids = null, reason = '', summary = '') {
   }
   return n
 }
+
+// Re-stamp the leases this session holds, and give up any that a peer has taken over.
+async function heartbeat($) {
+  const now = await $.clock.now()
+  for (const [id, held] of mine) {
+    const current = await readLease($, id)
+    if (current && current.sid !== me && classify(current, me, now, TTL_MS).state === 'held') {
+      mine.delete(id)
+      await note($, '⚠', 'lost ' + relPath(root, held.path) + ' to ' + current.label)
+      continue
+    }
+    await $.fs.write(leaseFile(id), encodeLease({ sid: me, label, ts: now, since: held.since, path: held.path }))
+  }
+  // Keep our place in line fresh, or the owner would take a stale wait file for a session that gave up
+  for (const [path] of waitingFor) await writeWait($, path, now)
+}
+
+// Someone is waiting for a file this session holds (told by message or by a .wait file).
+// Resolves true when this is news.
+async function onWaiter($, id, sid, who) {
