@@ -338,3 +338,213 @@ async function scan($) {
 
 function redraw($) {
   $.ui.invalidate('ui.render')
+}
+
+// Redraw once an alert has run out, so the band drops back to the counters.
+function expireLater($, ms) {
+  $.clock.after(ms + 100, () => redraw($))
+}
+
+// Wake this session up with a prompt from the mod. Not awaited by callers: it resolves only once the
+// session is idle and the new turn has started.
+async function resumeTask($, text) {
+  try {
+    await $.prompt.submit({ text })
+  } catch (err) {
+    await note($, '⚠', 'could not resume: ' + String(err).slice(0, 80))
+  }
+}
+
+// Files this session was waiting for are free. items: [{ path, rel, by }]
+async function onFreed($, items) {
+  const now = await $.clock.now()
+  for (const i of items) {
+    const w = waitingFor.get(i.path)
+    waitingFor.delete(i.path)
+    await writeWait($, i.path, 0)
+    // No summary by message (or no message at all): the owner may have left one on disk
+    if (!i.summary) {
+      const h = await readHandoff($, leaseId(i.path), now)
+      if (h && (!w || !w.ownerSid || h.sid === w.ownerSid)) {
+        i.summary = clipSummary(h.summary)
+        i.by = i.by || h.label
+      }
+    }
+  }
+  // Newer news than "blocked": don't leave a red pill up for a file that is free now
+  delete alerts.blocked
+  const canWake = autoResume && canWakeHere && !isPaused
+  const wake = canWake ? items.filter((i) => canResume(resumes.get(i.path), now)) : []
+  const manual = items.filter((i) => !wake.includes(i))
+  if (wake.length > 0) {
+    for (const i of wake) resumes.set(i.path, [...(resumes.get(i.path) ?? []), now])
+    const rel = wake[0].rel + (wake.length > 1 ? ' +' + (wake.length - 1) : '')
+    alerts.resumed = { at: now, rel }
+    $.ui.toast('▶ ' + rel + ' is free again' + (wake[0].by ? ' (' + wake[0].by + ' released it)' : '') + ': resuming the task')
+    await note($, '▶', 'resuming: ' + wake.map((i) => i.rel).join(', ') + ' free again')
+    resumeTask($, resumePrompt(wake))
+  }
+  if (manual.length > 0) {
+    const rel = manual[0].rel + (manual.length > 1 ? ' +' + (manual.length - 1) : '')
+    alerts.freed = { at: now, rel }
+    const why = canWake ? ' (auto-resume limit reached for this file)' : ''
+    $.ui.toast('🟢 ' + rel + ' is free again' + why + '. Ask Claude to retry.')
+    await note($, '🟢', manual.map((i) => i.rel).join(', ') + ' free again' + why)
+  }
+  needsRedraw = true
+  expireLater($, FLASH_MS)
+}
+
+// This session's task is over and someone is waiting: give them the files now, with what Claude said
+// when it finished, instead of keeping them for the grace period.
+async function handOver($, ids) {
+  for (const id of ids) {
+    const held = mine.get(id)
+    const ws = waiters.get(id)
+    if (!held || !ws || ws.size === 0) continue
+    const rel = relPath(root, held.path)
+    const who = [...ws.values()].join(', ')
+    await release($, [id], 'handed to ' + who, lastSummary)
+    alerts.handed = { at: await $.clock.now(), rel, who }
+    $.ui.toast('➜ handed ' + rel + ' to ' + who)
+    expireLater($, FLASH_MS)
+  }
+}
+
+// Two sessions waiting on each other's files would wait forever. Both see the cycle; the one with the
+// larger id gives back the file the other is waiting for, and waits its turn instead.
+async function untangle($) {
+  for (const [id, ws] of waiters) {
+    for (const [sid, who] of ws) {
+      const isMutual = [...waitingFor.values()].some((w) => w.ownerSid === sid)
+      if (!isMutual || !shouldYield(me, sid) || !mine.has(id)) continue
+      const rel = relPath(root, mine.get(id).path)
+      alerts.deadlock = { at: await $.clock.now(), who, rel }
+      $.ui.toast('↔ ' + who + ' and this session were waiting on each other: handed over ' + rel)
+      await note($, '↔', 'deadlock with ' + who + ': handed over ' + rel)
+      await release($, [id], 'deadlock with ' + who)
+      expireLater($, FLASH_MS)
+    }
+  }
+}
+
+async function onTick($) {
+  tick += 1
+  const before = JSON.stringify([peers, board])
+  try {
+    const now = await $.clock.now()
+    const due = dueForRelease([...mine].map(([id, h]) => ({ id, lastUsed: h.lastUsed })), { mode: holdMode, inTurn, turnEndedAt, now })
+    if (due.length > 0) await release($, due, holdMode === 'turn' && !inTurn ? 'task finished' : 'idle')
+    if (tick % (HEARTBEAT_MS / REFRESH_MS) === 0) await heartbeat($)
+    await scan($)
+    const freed = [...waitingFor].filter(([path]) => !peerLeases.some((l) => l.path === path)).map(([path, w]) => ({ path, rel: w.rel, by: '' }))
+    if (freed.length > 0) await onFreed($, freed)
+  } catch {
+    // A failed scan just leaves the last known picture on screen.
+  }
+  if (JSON.stringify([peers, board]) !== before || needsRedraw) {
+    needsRedraw = false
+    redraw($)
+  }
+}
+
+async function onMessage($, msg) {
+  const id = leaseId(msg.path)
+  const rel = relPath(root, msg.path)
+  if (msg.kind === 'waiting') {
+    if (!mine.has(id)) {
+      // We no longer hold it (released, or the lease went stale): say so, so the peer can go ahead.
+      await send($, msg.from.sid, { kind: 'released', path: msg.path }, rel + ' is not held by ' + label + ' any more.')
+      return
+    }
+    // A message makes it a firm waiter, even if we had only seen its .wait file so far
+    fileWaiters.delete(id + ':' + msg.from.sid)
+    await onWaiter($, id, msg.from.sid, msg.from.label)
+  } else if (waitingFor.has(msg.path)) {
+    await onFreed($, [{ path: msg.path, rel, by: msg.from.label, summary: msg.summary }])
+  }
+  await scan($)
+  redraw($)
+}
+
+// Called when this session is refused files: queue up, tell the owners, and check for a cycle.
+async function wait($, locked) {
+  const now = await $.clock.now()
+  for (const l of locked) {
+    waitingFor.set(l.norm, { rel: l.rel, owner: l.owner, ownerSid: l.sid })
+    await writeWait($, l.norm, now)
+  }
+  for (const l of locked) if (l.sid) await tellOwner($, l, l.norm, l.rel)
+  await untangle($)
+}
+
+function queuedSummary() {
+  const list = [...waitingFor.values()]
+  return list.length > 0 ? { rel: list[0].rel, owner: list[0].owner, count: list.length } : null
+}
+
+function statusText(now) {
+  const freeIn = releaseInMs({ mode: holdMode, inTurn, turnEndedAt, now, held: mine.size })
+  const lines = [
+    'agent-stoplight ' + (isPaused ? '(paused)' : 'is guarding ' + root),
+    'you are ' + label + ', holding ' + mine.size + ' file(s)' + (freeIn !== null ? ' (free in ' + countdownText(freeIn) + ')' : ''),
+    'hold ' + holdMode + ' · auto-resume ' + (autoResume ? 'on' : 'off') + ' · strict ' + (isStrict ? 'on' : 'off') + ' · shell guard ' + (guardShell ? 'on' : 'off'),
+  ]
+  for (const r of board) lines.push(r.light + ' ' + r.rel + ' · ' + r.owner + ' · ' + ageText(r.ageMs) + (r.waiters.length ? ' · 🔔 ' + r.waiters.join(', ') + ' waiting' : ''))
+  if (board.length === 0) lines.push('no live leases')
+  for (const w of waitingFor.values()) lines.push('⏳ waiting for ' + w.rel + ' (' + w.owner + ')')
+  return lines.join('\n')
+}
+
+export function register(on, options) {
+  // userConfig from the manifest: /plugin configure agent-stoplight sets these
+  isStrict = Boolean(options && options.strict)
+  guardShell = !(options && options.guard_shell === false)
+  autoResume = !(options && options.auto_resume === false)
+  if (options && HOLD_MODES.includes(options.hold)) holdMode = options.hold
+
+  on('session.start', async ($, e, next) => {
+    me = await $.session.id()
+    label = labelFor(me)
+    root = await $.session.root()
+    cwd = await $.session.cwd()
+    base = normalizePath(root).replace(/\/$/, '')
+    isWindows = /^[a-z]:\//.test(base)
+    isInteractive = e.isInteractive !== false
+    leaseDir = base + '/.claude/stoplight/leases'
+    traceOn = Boolean(await $.env.get('STOPLIGHT_TRACE'))
+    // Environment overrides, handy for CI and for trying a mode once
+    const strictEnv = await $.env.get('STOPLIGHT_STRICT')
+    if (strictEnv) isStrict = strictEnv !== '0'
+    const holdEnv = await $.env.get('STOPLIGHT_HOLD')
+    if (HOLD_MODES.includes(holdEnv)) holdMode = holdEnv
+    try {
+      // Keep leases out of `git status`. Writing a file creates its missing parent directories,
+      // and strict mode's mkdir needs the lease directory to exist already.
+      await $.fs.write(base + '/.claude/stoplight/.gitignore', '*\n')
+      await $.fs.write(leaseDir + '/.keep', '')
+    } catch {
+      // Not fatal: leases still work, they just show up as untracked files.
+    }
+    $.clock.every(REFRESH_MS, () => onTick($))
+    // The "free in m:ss" countdown on the band moves every second while it runs
+    $.clock.every(1000, () => {
+      if (releaseInMs({ mode: holdMode, inTurn, turnEndedAt, now: Date.now(), held: mine.size }) !== null) redraw($)
+    })
+    await note($, '🚦', 'session ' + label + ' started in ' + root)
+    // Which apps draw this session: a session some app draws can take a resume prompt
+    let surfaces = []
+    try {
+      surfaces = await $.session.surfaces()
+    } catch {
+      // Older builds: fall back to the event's own fields
+    }
+    const drawnBy = JSON.stringify([e.surface ?? null, surfaces ?? null])
+    canWakeHere = isInteractive || /desktop|vscode/i.test(drawnBy)
+    if (traceOn) await note($, '·', 'session.start isInteractive=' + e.isInteractive + ' surface=' + e.surface + ' surfaces=' + JSON.stringify(surfaces) + ' canWake=' + canWakeHere)
+    await $.command.register({
+      name: 'stoplight',
+      description: 'Who holds which files. release · pause · resume · status · hold turn|idle|session · auto on|off · strict on|off · shell on|off',
+      argumentHint: '[release|status|hold turn|auto off|strict on|shell off]',
+    })
+    return next(e)
