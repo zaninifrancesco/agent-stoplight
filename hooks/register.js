@@ -83,3 +83,68 @@ let needsRedraw = false
 
 async function sleep($, ms) {
   try {
+    await $.clock.sleep(ms)
+  } catch {
+    await $.clock.sleep({ ms })
+  }
+}
+
+function leaseFile(id) {
+  return leaseDir + '/' + id + '.lease'
+}
+
+// The file-system side of the protocol, next to the leases. It works in every permission mode: in auto
+// mode Claude Code may refuse $.session.send (a real Desktop run did), and then these files are all
+// the two sessions have.
+//   <id>.<sid8>.wait   "this session is waiting for file <id>" (a lease-format line; ts 0 = not any more)
+//   <id>.handoff       who released file <id> last, and what its Claude said when it finished (JSON)
+function waitFile(id, sid) {
+  return leaseDir + '/' + id + '.' + String(sid).replace(/[^a-zA-Z0-9]/g, '').slice(0, 8) + '.wait'
+}
+
+function handoffFile(id) {
+  return leaseDir + '/' + id + '.handoff'
+}
+
+async function writeWait($, path, ts) {
+  try {
+    await $.fs.write(waitFile(leaseId(path), me), encodeLease({ sid: me, label, ts, since: ts, path }))
+  } catch {
+    // Messages may still get through; and a stale wait file simply expires.
+  }
+}
+
+async function readHandoff($, id, now) {
+  try {
+    if (!(await $.fs.exists(handoffFile(id)))) return null
+    const h = JSON.parse(await $.fs.read(handoffFile(id)))
+    return h && typeof h.sid === 'string' && now - Number(h.ts) < HANDOFF_FRESH_MS ? h : null
+  } catch {
+    return null
+  }
+}
+
+// Something happened worth showing in the board's "Recent" list (and in the trace file when STOPLIGHT_TRACE is set).
+async function note($, light, text) {
+  const at = await $.clock.now()
+  events = pushEvent(events, { at, light, text })
+  if (!traceOn) return
+  traceLines = [...traceLines, new Date(at).toISOString() + ' ' + light + ' ' + text].slice(-200)
+  try {
+    await $.fs.write(base + '/.claude/stoplight/trace-' + label + '.log', traceLines.join('\n') + '\n')
+  } catch {
+    // Tracing is a debugging aid; never let it break the guard.
+  }
+}
+
+async function readLease($, id) {
+  const file = leaseFile(id)
+  if (!(await $.fs.exists(file))) return null
+  let lease = decodeLease(await $.fs.read(file))
+  if (!lease) {
+    // A write may be half-finished. Look once more before treating the file as garbage.
+    await sleep($, 5)
+    lease = decodeLease(await $.fs.read(file))
+  }
+  return lease
+}
