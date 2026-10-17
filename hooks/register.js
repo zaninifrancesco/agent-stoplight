@@ -268,3 +268,73 @@ async function heartbeat($) {
 // Someone is waiting for a file this session holds (told by message or by a .wait file).
 // Resolves true when this is news.
 async function onWaiter($, id, sid, who) {
+  const w = waiters.get(id) ?? new Map()
+  if (w.has(sid)) return false
+  w.set(sid, who)
+  waiters.set(id, w)
+  const rel = relPath(root, mine.get(id).path)
+  alerts.waiting = { at: await $.clock.now(), who, rel }
+  await note($, '🔔', who + ' is waiting for ' + rel)
+  const isIdle = !inTurn && turnEndedAt > 0 && (await $.clock.now()) - lastToolAt > BUSY_MS
+  if (isIdle && holdMode !== 'session') {
+    // Our task is already over (we are only in the grace period): no reason to make them wait
+    await handOver($, [id])
+  } else {
+    $.ui.toast('🔔 ' + who + ' is waiting for ' + rel + ' · it goes to them when this task ends')
+    expireLater($, WAIT_ALERT_MS)
+    await untangle($)
+  }
+  needsRedraw = true
+  return true
+}
+
+// Read every live lease in the repo: who is working here and on what.
+async function scan($) {
+  const now = await $.clock.now()
+  let entries = []
+  try {
+    entries = await $.fs.list(leaseDir)
+  } catch {
+    // No lease directory yet, so nobody holds anything.
+  }
+  const rows = []
+  const others = []
+  const bySession = new Map()
+  const waitSeen = new Set()
+  for (const entry of entries.slice(0, 400)) {
+    if (entry.name.endsWith('.wait')) {
+      // Someone is waiting for one of our files?
+      const id = entry.name.split('.')[0]
+      if (!mine.has(id)) continue
+      const w = decodeLease(await $.fs.read(leaseDir + '/' + entry.name))
+      if (!w || w.sid === me || w.ts === 0 || now - w.ts > TTL_MS) continue
+      waitSeen.add(id + ':' + w.sid)
+      if (await onWaiter($, id, w.sid, w.label)) fileWaiters.add(id + ':' + w.sid)
+      continue
+    }
+    if (!entry.name.endsWith('.lease')) continue
+    const lease = decodeLease(await $.fs.read(leaseDir + '/' + entry.name))
+    if (!lease || classify(lease, me, now, TTL_MS).state === 'free') continue
+    const isMine = lease.sid === me
+    const w = waiters.get(leaseId(lease.path))
+    rows.push({ mine: isMine, rel: relPath(root, lease.path), owner: lease.label, ageMs: now - lease.since, waiters: w ? [...w.values()] : [] })
+    if (!isMine) {
+      others.push({ sid: lease.sid, label: lease.label, path: lease.path })
+      bySession.set(lease.sid, { label: lease.label, files: (bySession.get(lease.sid)?.files ?? 0) + 1 })
+    }
+  }
+  // Waiters we only knew from a .wait file that is gone or stale have stopped waiting
+  for (const key of [...fileWaiters]) {
+    if (waitSeen.has(key)) continue
+    const [id, sid] = key.split(':')
+    waiters.get(id)?.delete(sid)
+    if (waiters.get(id)?.size === 0) waiters.delete(id)
+    fileWaiters.delete(key)
+  }
+  board = boardRows(rows)
+  peers = [...bySession.values()]
+  peerLeases = others
+}
+
+function redraw($) {
+  $.ui.invalidate('ui.render')
