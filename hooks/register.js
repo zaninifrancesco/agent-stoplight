@@ -633,3 +633,123 @@ export function register(on, options) {
     return next(e)
   }).catch(async ($, e, next) => next(e))
 
+  // Shell commands: best effort. Only writes the parser recognises are guarded (see lib/shell.js);
+  // everything else runs as usual. Same fail-open rule as the edit guard.
+  on('tool.call', { tool: ['Bash', 'PowerShell'] }, async ($, e, next) => {
+    if (isPaused || !guardShell || !me || typeof e.command !== 'string') return next(e)
+    const locked = []
+    try {
+      for (const t of shellTargets(e.command, e.tool, cwd)) {
+        const norm = resolvePath(t.cwd || cwd, t.path)
+        if (norm.startsWith(leaseDir)) continue
+        const verdict = await acquire($, norm)
+        if (verdict.state === 'held') locked.push({ norm, rel: relPath(root, norm), owner: verdict.owner, ageMs: verdict.ageMs, sid: verdict.sid })
+        else if (verdict.isNew) await note($, '🟢', 'took ' + relPath(root, norm) + ' (shell)')
+      }
+    } catch (err) {
+      $.ui.log('agent-stoplight: could not check this command, letting it run (' + String(err).slice(0, 100) + ')')
+      return next(e)
+    }
+    if (locked.length === 0) {
+      redraw($)
+      return next(e)
+    }
+    const first = locked[0]
+    alerts.blocked = { at: await $.clock.now(), rel: first.rel + (locked.length > 1 ? ' +' + (locked.length - 1) : ''), owner: first.owner, ageMs: first.ageMs }
+    blockedCount += 1
+    $.ui.toast('🔴 command not run: ' + locked.map((l) => l.rel).join(', ') + ' locked by ' + first.owner)
+    await note($, '🔴', 'blocked a ' + e.tool + ' command touching ' + locked.map((l) => l.rel).join(', '))
+    redraw($)
+    expireLater($, FLASH_MS)
+    await wait($, locked)
+    return { deny: shellDenyMessage(locked, autoResume && canWakeHere) }
+  }).catch(async ($, e, next) => next(e))
+
+  // Protocol messages from other agent-stoplight sessions are for this mod, not for Claude.
+  on('session.receive', async ($, e, next) => {
+    if (traceOn) await note($, '✉', 'received (' + (e.origin && e.origin.kind) + '): ' + String(e.text).replace(/\s+/g, ' ').slice(0, 160))
+    const msg = decodeMessage(e.text)
+    if (!msg) return next(e)
+    try {
+      await onMessage($, msg)
+    } catch {
+      // A malformed or unexpected message is dropped either way.
+    }
+    return { consumed: 'agent-stoplight protocol message' }
+  }).catch(async ($, e, next) => next(e))
+
+  on('session.end', async ($, e, next) => {
+    if (me) await release($)
+    return next(e)
+  })
+
+  on('command.run', { command: 'stoplight' }, async ($, e) => {
+    const arg = e.args.trim()
+    if (arg === 'release') {
+      const n = await release($, null, 'by hand')
+      await scan($)
+      redraw($)
+      return { text: 'Released ' + n + ' file(s). Other sessions can edit them now.' }
+    }
+    const toggle = arg.match(/^(strict|shell|auto)\s+(on|off)$/)
+    if (toggle) {
+      const enable = toggle[2] === 'on'
+      if (toggle[1] === 'strict') isStrict = enable
+      else if (toggle[1] === 'shell') guardShell = enable
+      else autoResume = enable
+      await note($, '⚙', toggle[1] + ' ' + toggle[2])
+      redraw($)
+      const what = { strict: 'Strict mode (atomic claims, slower first edit of each file)', shell: 'Shell command guarding', auto: 'Automatic resume when a file comes free' }[toggle[1]]
+      return { text: what + ' is ' + (enable ? 'on' : 'off') + ' for this session.' }
+    }
+    const hold = arg.match(/^hold\s+(\w+)$/)
+    if (hold) {
+      if (!HOLD_MODES.includes(hold[1])) return { text: 'Hold mode must be one of: ' + HOLD_MODES.join(', ') + '.' }
+      holdMode = hold[1]
+      await note($, '⚙', 'hold ' + holdMode)
+      redraw($)
+      const how = { turn: 'while Claude works on a task, then 2 minutes more', idle: 'until a file goes 10 minutes without an edit', session: 'until this session ends' }[holdMode]
+      return { text: 'Files are now held ' + how + '.' }
+    }
+    if (arg === 'pause' || arg === 'resume') {
+      isPaused = arg === 'pause'
+      await note($, isPaused ? '⏸' : '▶', isPaused ? 'paused' : 'resumed')
+      redraw($)
+      return { text: isPaused ? 'agent-stoplight paused: edits are no longer checked.' : 'agent-stoplight resumed.' }
+    }
+    await scan($)
+    if (arg === 'status') return { text: statusText(await $.clock.now()) }
+    await $.ui.open({ id: PANE, title: '🚦 Stoplight', focus: true, closeOnEscape: true })
+    return {}
+  })
+
+  // The band above the prompt: always visible, coloured pills, one alert at a time.
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    const { Box, Text } = $.ui.resolve(e)
+    const others = await next(e)
+    const now = await $.clock.now()
+    const columns = (e.props && e.props.bodyColumns) || 120
+    const segments = bandSegments(
+      {
+        mine: mine.size,
+        peers,
+        blockedCount,
+        paused: isPaused,
+        strict: isStrict,
+        now,
+        alert: pickAlert(alerts, now),
+        queued: queuedSummary(),
+        freeInMs: releaseInMs({ mode: holdMode, inTurn, turnEndedAt, now, held: mine.size }),
+      },
+      columns,
+    )
+    const row = Box({
+      flexDirection: 'row',
+      columnGap: 2,
+      children: segments.map((s, i) =>
+        Text({ key: 'seg-' + i, color: s.color, backgroundColor: s.bg, dimColor: s.dim, weight: s.bold ? 'bold' : undefined, children: [s.text] }),
+      ),
+    })
+    return Box({ flexDirection: 'column', children: [row, others].filter(Boolean) })
+  })
+
