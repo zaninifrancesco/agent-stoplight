@@ -148,3 +148,68 @@ async function readLease($, id) {
   }
   return lease
 }
+
+// Try to take (or confirm) the lease for a path.
+// Resolves { state: 'mine', isNew } or { state: 'held', owner, sid, ageMs }.
+async function acquire($, norm) {
+  const id = leaseId(norm)
+  const now = await $.clock.now()
+  const held = mine.get(id)
+  if (held) {
+    held.lastUsed = now
+    return { state: 'mine', isNew: false }
+  }
+
+  const observed = await readLease($, id)
+  const verdict = classify(observed, me, now, TTL_MS)
+  if (verdict.state === 'held') return verdict
+
+  if (isStrict) {
+    const r = await $.process.run(mkdirArgv(leaseDir + '/' + lockName(id, observed), isWindows))
+    if (r.exitCode !== 0) {
+      // Someone else won this exact transition. Their lease may still be on its way: look twice.
+      for (let i = 0; i < 3; i++) {
+        const theirs = await readLease($, id)
+        const v = classify(theirs, me, await $.clock.now(), TTL_MS)
+        if (v.state === 'held') return v
+        await sleep($, 20)
+      }
+      // No lease ever showed up. A lock left by a crash mid-claim is stale after the TTL; then fall back.
+      let lock = null
+      try {
+        lock = await $.fs.stat(leaseDir + '/' + lockName(id, observed))
+      } catch {
+        // No way to tell its age: treat the claim as still in progress.
+      }
+      const mtime = lock && Number(lock.mtimeMs ?? lock.modifiedMs ?? lock.mtime)
+      if (!(Number.isFinite(mtime) && (await $.clock.now()) - mtime > TTL_MS)) {
+        return { state: 'held', owner: 'another session (claim in progress)', sid: '', ageMs: 0 }
+      }
+    }
+    await $.fs.write(leaseFile(id), encodeLease({ sid: me, label, ts: now, since: now, path: norm }))
+    mine.set(id, { path: norm, since: now, lastUsed: now })
+    return { state: 'mine', isNew: true }
+  }
+
+  await $.fs.write(leaseFile(id), encodeLease({ sid: me, label, ts: now, since: now, path: norm }))
+  await sleep($, CLAIM_WAIT_MS)
+  // Last writer wins: if a racing session wrote after us, its id is what we read back.
+  const back = await readLease($, id)
+  if (back && back.sid !== me) return classify(back, me, await $.clock.now(), TTL_MS)
+
+  mine.set(id, { path: norm, since: now, lastUsed: now })
+  return { state: 'mine', isNew: true }
+}
+
+async function send($, sid, msg, human) {
+  try {
+    const r = await $.session.send({ to: { sessionId: sid }, text: encodeMessage({ ...msg, from: { sid: me, label } }, human) })
+    await note($, '✉', msg.kind + ' → ' + sid.slice(0, 8) + (r && r.isDelivered ? ' delivered' : ' not delivered: ' + (r && r.reason)))
+    return Boolean(r && r.isDelivered)
+  } catch (err) {
+    await note($, '✉', msg.kind + ' → ' + sid.slice(0, 8) + ' failed: ' + String(err).slice(0, 80))
+    return false
+  }
+}
+
+// Tell the owner of a file that this session is waiting for it, at most once a minute per file.
