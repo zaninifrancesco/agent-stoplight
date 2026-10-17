@@ -213,3 +213,38 @@ async function send($, sid, msg, human) {
 }
 
 // Tell the owner of a file that this session is waiting for it, at most once a minute per file.
+async function tellOwner($, verdict, norm, rel) {
+  const key = verdict.sid + ':' + leaseId(norm)
+  const now = await $.clock.now()
+  if (now - (notified.get(key) ?? -Infinity) < NOTIFY_DEDUPE_MS) return
+  notified.set(key, now)
+  await send($, verdict.sid, { kind: 'waiting', path: norm }, label + ' (another Claude Code session) is waiting for ' + rel + ', which you hold. It will be resumed automatically when you let go of the file.')
+}
+
+// Mark leases as released (ts 0) and tell whoever was waiting, with `summary` (what this session's Claude
+// said when it finished) as context for them. `ids` null means every file. Returns how many.
+async function release($, ids = null, reason = '', summary = '') {
+  let n = 0
+  const freed = [...mine].filter(([id]) => ids === null || ids.includes(id))
+  for (const [id] of freed) mine.delete(id)
+  for (const [id, held] of freed) {
+    try {
+      // The hand-off note goes first, so a waiter that sees the lease free also finds the summary
+      if (summary) await $.fs.write(handoffFile(id), JSON.stringify({ sid: me, label, ts: await $.clock.now(), summary }))
+      await $.fs.write(leaseFile(id), encodeLease({ sid: me, label, ts: 0, since: held.since, path: held.path }))
+      n += 1
+    } catch {
+      // Best effort: an unreleased lease expires on its own after the TTL.
+    }
+    for (const [sid] of waiters.get(id) ?? []) {
+      const msg = summary ? { kind: 'released', path: held.path, summary } : { kind: 'released', path: held.path }
+      await send($, sid, msg, relPath(root, held.path) + ' is free again: ' + label + ' released it.')
+    }
+    waiters.delete(id)
+  }
+  if (n > 0) {
+    await note($, '🟢', 'released ' + (n === 1 && freed[0] ? relPath(root, freed[0][1].path) : n + ' file(s)') + (reason ? ' (' + reason + ')' : ''))
+    needsRedraw = true
+  }
+  return n
+}
