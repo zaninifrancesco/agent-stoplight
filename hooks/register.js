@@ -753,3 +753,13 @@ export function register(on, options) {
     return Box({ flexDirection: 'column', children: [row, others].filter(Boolean) })
   })
 
+  // The /stoplight board: who holds what, who is waiting, and what just happened.
+  on('ui.render', { component: 'Pane' }, async ($, e, next) => {
+    if (e.requestId !== PANE) return next(e)
+    const { Box, Text, Button } = $.ui.resolve(e)
+    const now = await $.clock.now()
+    const columns = (e.props && e.props.bodyColumns) || 80
+    const freeInMs = releaseInMs({ mode: holdMode, inTurn, turnEndedAt, now, held: mine.size })
+    const header = bandSegments({ mine: mine.size, peers, blockedCount, paused: isPaused, strict: isStrict, now, alert: null, freeInMs }, columns).slice(0, -1)
+
+    const fileRows = board.map((r, i) =>
