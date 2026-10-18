@@ -773,3 +773,13 @@ export function register(on, options) {
           Text({ dimColor: true, children: [r.owner + ' · ' + ageText(r.ageMs)] }),
           ...(r.waiters.length > 0 ? [Text({ color: 'yellow', weight: 'bold', children: ['🔔 ' + r.waiters.join(', ') + ' waiting'] })] : []),
         ],
+      }),
+    )
+    const waitRows = [...waitingFor.values()].map((w, i) =>
+      Box({
+        key: 'wait-' + i,
+        flexDirection: 'row',
+        columnGap: 2,
+        children: [
+          Text({ backgroundColor: 'blue', color: 'white', children: [' ⏳ '] }),
+          Text({ weight: 'bold', children: [w.rel] }),
