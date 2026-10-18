@@ -803,3 +803,13 @@ export function register(on, options) {
         ...(recent.length > 0 ? recent : [Text({ dimColor: true, children: ['Nothing yet.'] })]),
         Text({ children: [' '] }),
         Box({
+          flexDirection: 'row',
+          columnGap: 2,
+          children: [
+            Button({
+              key: 'release',
+              label: 'Release mine',
+              hotkey: 'r',
+              onPress: async () => {
+                await release($, null, 'by hand')
+                await scan($)
