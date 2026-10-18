@@ -813,3 +813,13 @@ export function register(on, options) {
               onPress: async () => {
                 await release($, null, 'by hand')
                 await scan($)
+                redraw($)
+              },
+            }),
+            Button({
+              key: 'refresh',
+              label: 'Refresh',
+              hotkey: 'f',
+              onPress: async () => {
+                await scan($)
+                redraw($)
