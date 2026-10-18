@@ -793,3 +793,13 @@ export function register(on, options) {
       flexDirection: 'column',
       children: [
         Box({ flexDirection: 'row', columnGap: 2, children: header.map((s, i) => Text({ key: 'h-' + i, color: s.color, backgroundColor: s.bg, dimColor: s.dim, weight: s.bold ? 'bold' : undefined, children: [s.text] })) }),
+        Text({ dimColor: true, children: ['You are ' + label + ' · hold ' + holdMode + ' · auto-resume ' + (autoResume ? 'on' : 'off') + ' · leases in ' + relPath(root, leaseDir)] }),
+        Text({ children: [' '] }),
+        Text({ weight: 'bold', children: ['FILES'] }),
+        ...(fileRows.length > 0 ? fileRows : [Text({ dimColor: true, children: ['No live leases. Every file is 🟢 free.'] })]),
+        ...(waitRows.length > 0 ? [Text({ children: [' '] }), Text({ weight: 'bold', children: ['WAITING FOR'] }), ...waitRows] : []),
+        Text({ children: [' '] }),
+        Text({ weight: 'bold', children: ['RECENT'] }),
+        ...(recent.length > 0 ? recent : [Text({ dimColor: true, children: ['Nothing yet.'] })]),
+        Text({ children: [' '] }),
+        Box({
