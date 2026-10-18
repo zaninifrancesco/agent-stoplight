@@ -783,3 +783,13 @@ export function register(on, options) {
         children: [
           Text({ backgroundColor: 'blue', color: 'white', children: [' ⏳ '] }),
           Text({ weight: 'bold', children: [w.rel] }),
+          Text({ dimColor: true, children: ['held by ' + w.owner + (autoResume && canWakeHere ? ' · resumes by itself' : ' · retry by hand')] }),
+        ],
+      }),
+    )
+    const recent = events.slice(0, 8).map((ev, i) => Text({ key: 'ev-' + i, dimColor: i > 0, children: [ev.light + ' ' + ev.text + '  ·  ' + ageText(now - ev.at) + ' ago'] }))
+
+    return Box({
+      flexDirection: 'column',
+      children: [
+        Box({ flexDirection: 'row', columnGap: 2, children: header.map((s, i) => Text({ key: 'h-' + i, color: s.color, backgroundColor: s.bg, dimColor: s.dim, weight: s.bold ? 'bold' : undefined, children: [s.text] })) }),
