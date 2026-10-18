@@ -763,3 +763,13 @@ export function register(on, options) {
     const header = bandSegments({ mine: mine.size, peers, blockedCount, paused: isPaused, strict: isStrict, now, alert: null, freeInMs }, columns).slice(0, -1)
 
     const fileRows = board.map((r, i) =>
+      Box({
+        key: 'file-' + i,
+        flexDirection: 'row',
+        columnGap: 2,
+        children: [
+          Text({ backgroundColor: r.light === '🟢' ? 'green' : 'red', color: r.light === '🟢' ? 'black' : 'white', children: [' ' + r.light + ' '] }),
+          Text({ weight: 'bold', children: [r.rel] }),
+          Text({ dimColor: true, children: [r.owner + ' · ' + ageText(r.ageMs)] }),
+          ...(r.waiters.length > 0 ? [Text({ color: 'yellow', weight: 'bold', children: ['🔔 ' + r.waiters.join(', ') + ' waiting'] })] : []),
+        ],
