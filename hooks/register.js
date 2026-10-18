@@ -823,3 +823,13 @@ export function register(on, options) {
               onPress: async () => {
                 await scan($)
                 redraw($)
+              },
+            }),
+            Button({
+              key: 'pause',
+              label: isPaused ? 'Resume' : 'Pause',
+              hotkey: 'p',
+              onPress: async () => {
+                isPaused = !isPaused
+                await note($, isPaused ? '⏸' : '▶', isPaused ? 'paused' : 'resumed')
+                redraw($)
