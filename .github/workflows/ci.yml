@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      benchmark:
+        description: Also run the claim-race benchmark (needs the ANTHROPIC_API_KEY secret)
+        type: boolean
+        default: false
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code && claude --version
+      - name: Validate the mod
+        run: claude plugin validate . --strict
+      - name: Validate the spike mod
+        run: claude plugin validate spike
+      # Unit and hook tests: no session, no sign-in, no network
+      - name: Test
+        run: claude plugin test
+
+  benchmark:
+    name: benchmark (${{ matrix.os }})
+    if: github.event_name == 'workflow_dispatch' && inputs.benchmark
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install -g @anthropic-ai/claude-code
+      # 4 headless sessions race on the same keys; the slash command is answered by the mod, no model call
+      - name: Claim race
+        run: bash spike/tools/race.sh ci-${{ matrix.os }} 4 | tee spike/results/summary-${{ matrix.os }}.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: spike-results-${{ matrix.os }}
+          path: spike/results/
