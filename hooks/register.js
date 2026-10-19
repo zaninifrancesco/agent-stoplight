@@ -833,3 +833,7 @@ export function register(on, options) {
                 isPaused = !isPaused
                 await note($, isPaused ? '⏸' : '▶', isPaused ? 'paused' : 'resumed')
                 redraw($)
+              },
+            }),
+          ],
+        }),
